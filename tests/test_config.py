@@ -22,6 +22,7 @@ def test_default_settings_load() -> None:
     assert settings.allowed_data_directories == (Path("knowledge"),)
     assert settings.markdown_max_file_size_bytes == 2 * 1024 * 1024
     assert settings.markdown_max_total_size_bytes == 20 * 1024 * 1024
+    assert settings.markdown_chunk_max_characters == 1200
 
 
 def test_environment_variables_override_settings(monkeypatch) -> None:
@@ -39,6 +40,7 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     )
     monkeypatch.setenv("MARKDOWN_MAX_FILE_SIZE_BYTES", "1024")
     monkeypatch.setenv("MARKDOWN_MAX_TOTAL_SIZE_BYTES", "4096")
+    monkeypatch.setenv("MARKDOWN_CHUNK_MAX_CHARACTERS", "256")
 
     # get_settings 使用了缓存；读取新环境变量前必须清除旧配置对象。
     get_settings.cache_clear()
@@ -60,6 +62,7 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     )
     assert settings.markdown_max_file_size_bytes == 1024
     assert settings.markdown_max_total_size_bytes == 4096
+    assert settings.markdown_chunk_max_characters == 256
 
 
 def test_rejects_empty_allowed_data_directories() -> None:
@@ -76,3 +79,9 @@ def test_rejects_non_positive_markdown_byte_limits(field_name: str) -> None:
     # 两个大小字段共用同一条正整数约束。
     with pytest.raises(ValidationError, match="must be greater than zero"):
         Settings(**{field_name: 0}, _env_file=None)
+
+
+def test_rejects_non_positive_markdown_chunk_limit() -> None:
+    # 字符上限和读取字节上限分别校验，避免混淆两种单位。
+    with pytest.raises(ValidationError, match="must be greater than zero"):
+        Settings(markdown_chunk_max_characters=0, _env_file=None)

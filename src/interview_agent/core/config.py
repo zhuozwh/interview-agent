@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     markdown_max_file_size_bytes: int = 2 * 1024 * 1024
     markdown_max_total_size_bytes: int = 20 * 1024 * 1024
 
+    # Phase 1B 暂按字符数控制片段长度，不与具体 Embedding 模型的 tokenizer 绑定。
+    markdown_chunk_max_characters: int = 1200
+
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
     @field_validator("log_level")
     @classmethod
@@ -67,6 +70,16 @@ class Settings(BaseSettings):
         # 0 或负数会让大小限制失去明确语义，因此在配置加载阶段就拒绝。
         if value <= 0:
             raise ValueError("Markdown byte limits must be greater than zero")
+        return value
+
+    @field_validator("markdown_chunk_max_characters")
+    @classmethod
+    def require_positive_chunk_limit(cls, value: int) -> int:
+        """Markdown 片段长度上限必须是正整数。"""
+        if value <= 0:
+            raise ValueError(
+                "MARKDOWN_CHUNK_MAX_CHARACTERS must be greater than zero"
+            )
         return value
 
 

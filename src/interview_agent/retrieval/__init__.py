@@ -10,14 +10,22 @@ from interview_agent.retrieval.markdown import (
     MarkdownSizeError,
     load_markdown_documents,
 )
+from interview_agent.retrieval.chunking import (
+    MarkdownChunk,
+    split_markdown_document,
+    split_markdown_documents,
+)
 
 # __all__ 明确声明该模块对外承诺的公共接口，以下划线开头的辅助函数不会暴露。
 __all__ = [
     "MarkdownDiscoveryError",
+    "MarkdownChunk",
     "MarkdownDocument",
     "MarkdownLoadError",
     "MarkdownPathError",
     "MarkdownReadError",
     "MarkdownSizeError",
     "load_markdown_documents",
+    "split_markdown_document",
+    "split_markdown_documents",
 ]

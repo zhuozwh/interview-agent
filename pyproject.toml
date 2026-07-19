@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # 项目基本信息和实际运行所需依赖。
 [project]
 name = "interview-agent"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local AI agent foundation for technical learning and interview preparation."
 readme = "README.md"
 requires-python = ">=3.11"
