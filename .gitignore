@@ -1,9 +1,9 @@
-# Secrets and local configuration
+# 密钥和仅限本机使用的配置
 .env
 .env.*
 !.env.example
 
-# Python environments and caches
+# Python 虚拟环境、缓存和构建产物
 .venv/
 venv/
 __pycache__/
@@ -15,7 +15,7 @@ __pycache__/
 build/
 dist/
 
-# Local runtime data
+# 本地运行时数据：不能提交数据库、向量索引和日志
 *.db
 *.sqlite
 *.sqlite3
@@ -25,7 +25,7 @@ vector_index/
 *.index
 logs/
 
-# IDE and operating system files
+# IDE 和操作系统自动生成的文件
 .idea/
 .vscode/
 .DS_Store

@@ -1,1 +1,1 @@
-"""Core configuration and logging utilities."""
+"""应用配置和日志等核心基础设施。"""

@@ -1,1 +1,1 @@
-"""Local storage infrastructure."""
+"""SQLite 等本地存储基础设施。"""

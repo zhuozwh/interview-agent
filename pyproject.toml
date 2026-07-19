@@ -1,7 +1,9 @@
+# 构建系统：pip 根据这里的配置安装当前项目。
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+# 项目基本信息和实际运行所需依赖。
 [project]
 name = "interview-agent"
 version = "0.1.0"
@@ -15,15 +17,18 @@ dependencies = [
     "uvicorn>=0.30,<1.0",
 ]
 
+# 只在开发和测试时安装的依赖，通过 pip install -e ".[dev]" 启用。
 [project.optional-dependencies]
 dev = [
     "httpx>=0.27,<1.0",
     "pytest>=8,<10",
 ]
 
+# 告诉 setuptools：Python 包位于 src 目录，而不是仓库根目录。
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# pytest 的统一配置：只搜索 tests，并关闭可能引起跨账户权限冲突的持久缓存。
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra -p no:cacheprovider"

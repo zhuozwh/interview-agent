@@ -1,1 +1,1 @@
-"""HTTP API package."""
+"""集中放置 HTTP 接口和路由的包。"""
