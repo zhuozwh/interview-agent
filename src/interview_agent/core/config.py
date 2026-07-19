@@ -26,6 +26,15 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_path: Path = Path("data/interview_agent.db")
 
+    # Markdown 源目录表示真正要扫描的文件夹；允许目录则是它不能越过的安全边界。
+    # 使用元组而不是可变列表，避免应用运行期间意外改变读取白名单。
+    markdown_source_directory: Path = Path("knowledge")
+    allowed_data_directories: tuple[Path, ...] = (Path("knowledge"),)
+
+    # 两级字节上限分别限制单个文件和一次批量加载，防止意外读取超大目录。
+    markdown_max_file_size_bytes: int = 2 * 1024 * 1024
+    markdown_max_total_size_bytes: int = 20 * 1024 * 1024
+
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
     @field_validator("log_level")
     @classmethod
@@ -37,6 +46,28 @@ class Settings(BaseSettings):
             expected = ", ".join(sorted(allowed_levels))
             raise ValueError(f"LOG_LEVEL must be one of: {expected}")
         return normalized
+
+    @field_validator("allowed_data_directories")
+    @classmethod
+    def require_allowed_data_directories(
+        cls, value: tuple[Path, ...]
+    ) -> tuple[Path, ...]:
+        """拒绝没有任何允许目录的配置，避免加载器失去路径边界。"""
+        # 空白名单不能理解成“允许所有目录”，必须直接判定为配置错误。
+        if not value:
+            raise ValueError("ALLOWED_DATA_DIRECTORIES must not be empty")
+        return value
+
+    @field_validator(
+        "markdown_max_file_size_bytes", "markdown_max_total_size_bytes"
+    )
+    @classmethod
+    def require_positive_byte_limit(cls, value: int) -> int:
+        """读取上限必须是正整数。"""
+        # 0 或负数会让大小限制失去明确语义，因此在配置加载阶段就拒绝。
+        if value <= 0:
+            raise ValueError("Markdown byte limits must be greater than zero")
+        return value
 
 
 # 缓存配置对象，保证同一进程通常只解析一次环境配置。
