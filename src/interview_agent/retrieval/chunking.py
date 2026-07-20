@@ -55,9 +55,13 @@ def split_markdown_document(
 ) -> list[MarkdownChunk]:
     """按标题和长度切分一篇文档，并保留稳定顺序与原始行号。"""
     _validate_max_chunk_characters(max_chunk_characters)
+    if document.content_start_line <= 0:
+        raise ValueError("document.content_start_line must be greater than zero")
 
     chunks: list[MarkdownChunk] = []
-    for section in _find_sections(document.content):
+    for section in _find_sections(
+        document.content, start_line=document.content_start_line
+    ):
         for numbered_lines in _split_section_lines(
             section.lines, max_chunk_characters
         ):
@@ -102,9 +106,14 @@ def split_markdown_documents(
     return chunks
 
 
-def _find_sections(content: str) -> list[_MarkdownSection]:
+def _find_sections(
+    content: str, *, start_line: int = 1
+) -> list[_MarkdownSection]:
     """识别代码围栏外的 ATX 标题，并按标题边界生成章节。"""
-    numbered_lines = tuple(enumerate(content.splitlines(keepends=True), start=1))
+    # start_line 让 Front Matter 被移除后，片段仍引用原文件中的真实行号。
+    numbered_lines = tuple(
+        enumerate(content.splitlines(keepends=True), start=start_line)
+    )
     if not numbered_lines:
         return []
 

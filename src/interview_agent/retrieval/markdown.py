@@ -17,8 +17,14 @@ class MarkdownDocument:
     source_path: Path
     # relative_path 相对于配置的数据源，后续可用于引用展示，避免暴露绝对路径。
     relative_path: Path
-    # Phase 1A 只保存完整原文；标题解析和切分留到后续阶段。
+    # loader 初次返回完整原文；Front Matter 分离后这里只保存可检索正文。
     content: str
+
+    # Front Matter 以包含 --- 边界的原始文本保留，但不会进入后续检索片段。
+    front_matter: str | None = None
+
+    # content 第一行在原文件中的 1-based 行号；未分离时从第 1 行开始。
+    content_start_line: int = 1
 
 
 # 下面的异常都继承同一个基类，调用方既可以统一处理，也可以按失败类型分别处理。

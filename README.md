@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前版本为 **v0.2.1**，已完成 **Phase 1B：Markdown 结构化切分基础**。
+当前版本为 **v0.2.2**，已完成 **Phase 1C：Markdown 增量索引准备**。
 
 已实现：
 
@@ -19,13 +19,17 @@
 - 路径规范化、越界拦截、稳定排序和有界读取；
 - 按 ATX 标题层级和段落确定性切分 Markdown；
 - 每个片段保留来源、标题路径、文档内序号和原文行号；
+- 原样分离 Front Matter，并保持正文在原文件中的行号；
+- 为文档和片段生成稳定 ID 与 SHA-256 指纹；
+- 确定性判断新增、修改、未变化和删除文档；
+- SQLite 保存文档和片段索引状态，不保存原始正文或绝对路径；
 - pytest 基础测试。
 
 尚未实现：
 
 - DeepSeek 或其他 LLM API；
-- Front Matter 解析；
-- Markdown 索引、Embedding、向量数据库和 RAG；
+- Front Matter 字段值的语义解析；
+- Embedding、向量数据库和 RAG；
 - Agent Router、Tool Calling 和面试问答；
 - Web 前端。
 
@@ -57,7 +61,7 @@ python -m venv .venv
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
-## Markdown 只读加载与切分
+## Markdown 只读加载、切分与增量状态
 
 先在 `.env` 中配置 Markdown 源目录及允许目录。`ALLOWED_DATA_DIRECTORIES` 使用 JSON 数组；源目录可以是允许目录本身或其子目录：
 
@@ -74,9 +78,11 @@ MARKDOWN_CHUNK_MAX_CHARACTERS=1200
 ```python
 from interview_agent.core.config import get_settings
 from interview_agent.retrieval import (
+    build_index_plan,
     load_markdown_documents,
-    split_markdown_documents,
+    prepare_index_documents,
 )
+from interview_agent.storage import SQLiteDatabase, SQLiteIndexStateStore
 
 settings = get_settings()
 documents = load_markdown_documents(
@@ -85,15 +91,34 @@ documents = load_markdown_documents(
     max_file_size_bytes=settings.markdown_max_file_size_bytes,
     max_total_size_bytes=settings.markdown_max_total_size_bytes,
 )
-chunks = split_markdown_documents(
+current_documents = prepare_index_documents(
     documents,
     max_chunk_characters=settings.markdown_chunk_max_characters,
+    source_namespace="notes",
 )
+
+store = SQLiteIndexStateStore(SQLiteDatabase(settings.database_path))
+store.initialize()
+plan = build_index_plan(current_documents, store.load_document_states())
+
+print(
+    len(plan.added),
+    len(plan.modified),
+    len(plan.unchanged),
+    len(plan.deleted),
+)
+
+# 查看计划不会写入任何状态；确认当前索引流程成功后再应用到本地 SQLite。
+store.apply_plan(plan)
 ```
 
-每篇文档包含绝对规范化的 `source_path`、相对数据源的 `relative_path` 和 UTF-8 `content`。每个切分结果额外包含 `heading_path`、从 1 开始的 `start_line` 和 `end_line`、文档内 `chunk_index`。切分只识别代码围栏外的 `#` 到 `######` ATX 标题；短内容优先保持段落完整，超长内容才按行和字符继续切分。
+每篇文档包含绝对规范化的 `source_path`、相对数据源的 `relative_path` 和 UTF-8 `content`。Front Matter 会从检索正文中分离并原样保留；正文片段仍使用原文件中从 1 开始的真实行号。切分只识别代码围栏外的 `#` 到 `######` ATX 标题；短内容优先保持段落完整，超长内容才按行和字符继续切分。
 
-源目录越界、符号链接解析后越界、扫描失败、单文件读取或 UTF-8 解码失败、内容超过上限都会抛出明确异常，不会静默跳过失败文件。加载和切分过程都不会修改原始 Markdown。当前仍不解析 Front Matter，也不调用 Embedding 或建立索引。
+`prepare_index_documents` 会生成稳定文档 ID、片段 ID、原文指纹和索引指纹。`build_index_plan` 将当前文件与 SQLite 状态比较，返回 `added`、`modified`、`unchanged` 和 `deleted` 四组结果。相对路径或数据源命名空间改变会视为删除旧文档并新增新文档；正文、Front Matter、切分配置或定位元数据改变会视为修改。
+
+SQLite 只保存数据源命名空间、相对路径、指纹、标题路径和行号等索引状态，不保存 Markdown 正文及本机绝对路径。`store.apply_plan(plan)` 只写本地 SQLite，不会修改原始 Vault。当前还不解释 Front Matter 字段值，也不调用 Embedding 或建立向量索引。
+
+源目录越界、符号链接解析后越界、扫描失败、Front Matter 未闭合、UTF-8 解码失败或内容超过上限都会抛出明确异常，不会静默跳过失败文件。
 
 ## 项目文档
 
