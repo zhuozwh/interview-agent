@@ -1,6 +1,17 @@
-"""公开 Markdown 读取、切分和增量索引准备能力。"""
+"""公开 Markdown 读取、切分、增量索引和向量检索能力。"""
 
 # 调用方只需从 retrieval 包导入这些名称，不必了解内部文件如何组织。
+from interview_agent.retrieval.embedding import (
+    EmbeddingConfigurationError,
+    EmbeddingError,
+    EmbeddingInputError,
+    EmbeddingProvider,
+    EmbeddingProviderError,
+    EmbeddingResponseError,
+    embed_query,
+    embed_texts,
+    validate_embedding_provider,
+)
 from interview_agent.retrieval.markdown import (
     MarkdownDiscoveryError,
     MarkdownDocument,
@@ -31,9 +42,31 @@ from interview_agent.retrieval.chunking import (
     split_markdown_document,
     split_markdown_documents,
 )
+from interview_agent.retrieval.vector_index import (
+    ChunkSearchResult,
+    VectorIndexError,
+    VectorIndexProfile,
+    VectorIndexProfileError,
+    VectorIndexStateStore,
+    VectorRecord,
+    VectorSearchInputError,
+    VectorStore,
+    VectorStoreError,
+    VectorSyncReport,
+    build_vector_index_profile,
+    search_chunks,
+    synchronize_vector_index,
+)
 
 # __all__ 明确声明该模块对外承诺的公共接口，以下划线开头的辅助函数不会暴露。
 __all__ = [
+    "ChunkSearchResult",
+    "EmbeddingConfigurationError",
+    "EmbeddingError",
+    "EmbeddingInputError",
+    "EmbeddingProvider",
+    "EmbeddingProviderError",
+    "EmbeddingResponseError",
     "IndexChunk",
     "IndexDocument",
     "IndexPlan",
@@ -47,13 +80,28 @@ __all__ = [
     "MarkdownSizeError",
     "StoredChunkState",
     "StoredDocumentState",
+    "VectorIndexError",
+    "VectorIndexProfile",
+    "VectorIndexProfileError",
+    "VectorIndexStateStore",
+    "VectorRecord",
+    "VectorSearchInputError",
+    "VectorStore",
+    "VectorStoreError",
+    "VectorSyncReport",
     "build_index_plan",
+    "build_vector_index_profile",
+    "embed_query",
+    "embed_texts",
     "load_markdown_documents",
     "prepare_index_document",
     "prepare_index_documents",
     "reconstruct_document_content",
     "separate_front_matter",
     "separate_front_matter_documents",
+    "search_chunks",
     "split_markdown_document",
     "split_markdown_documents",
+    "synchronize_vector_index",
+    "validate_embedding_provider",
 ]

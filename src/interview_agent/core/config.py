@@ -38,6 +38,11 @@ class Settings(BaseSettings):
     # Phase 1B 暂按字符数控制片段长度，不与具体 Embedding 模型的 tokenizer 绑定。
     markdown_chunk_max_characters: int = 1200
 
+    # Chroma 只保存本地向量索引；模型身份和维度由实际 Embedding 适配器提供。
+    vector_store_path: Path = Path("vector_index")
+    vector_collection_name: str = "interview_agent_chunks"
+    embedding_batch_size: int = 64
+
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
     @field_validator("log_level")
     @classmethod
@@ -82,6 +87,24 @@ class Settings(BaseSettings):
             )
         return value
 
+    @field_validator("vector_collection_name")
+    @classmethod
+    def require_non_empty_vector_name(cls, value: str) -> str:
+        """Chroma 集合名必须明确。"""
+        normalized = value.strip()
+        if not normalized or "\0" in normalized:
+            raise ValueError(
+                "Vector collection name must be non-empty and contain no NUL"
+            )
+        return normalized
+
+    @field_validator("embedding_batch_size")
+    @classmethod
+    def require_positive_embedding_batch_size(cls, value: int) -> int:
+        """Embedding 批大小必须是正整数，避免无限循环或无意义调用。"""
+        if value <= 0:
+            raise ValueError("EMBEDDING_BATCH_SIZE must be greater than zero")
+        return value
 
 # 缓存配置对象，保证同一进程通常只解析一次环境配置。
 @lru_cache

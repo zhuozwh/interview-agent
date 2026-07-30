@@ -23,6 +23,9 @@ def test_default_settings_load() -> None:
     assert settings.markdown_max_file_size_bytes == 2 * 1024 * 1024
     assert settings.markdown_max_total_size_bytes == 20 * 1024 * 1024
     assert settings.markdown_chunk_max_characters == 1200
+    assert settings.vector_store_path == Path("vector_index")
+    assert settings.vector_collection_name == "interview_agent_chunks"
+    assert settings.embedding_batch_size == 64
 
 
 def test_environment_variables_override_settings(monkeypatch) -> None:
@@ -41,6 +44,9 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("MARKDOWN_MAX_FILE_SIZE_BYTES", "1024")
     monkeypatch.setenv("MARKDOWN_MAX_TOTAL_SIZE_BYTES", "4096")
     monkeypatch.setenv("MARKDOWN_CHUNK_MAX_CHARACTERS", "256")
+    monkeypatch.setenv("VECTOR_STORE_PATH", "temporary/vectors")
+    monkeypatch.setenv("VECTOR_COLLECTION_NAME", "test_chunks")
+    monkeypatch.setenv("EMBEDDING_BATCH_SIZE", "16")
 
     # get_settings 使用了缓存；读取新环境变量前必须清除旧配置对象。
     get_settings.cache_clear()
@@ -63,6 +69,9 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.markdown_max_file_size_bytes == 1024
     assert settings.markdown_max_total_size_bytes == 4096
     assert settings.markdown_chunk_max_characters == 256
+    assert settings.vector_store_path == Path("temporary/vectors")
+    assert settings.vector_collection_name == "test_chunks"
+    assert settings.embedding_batch_size == 16
 
 
 def test_rejects_empty_allowed_data_directories() -> None:
@@ -85,3 +94,12 @@ def test_rejects_non_positive_markdown_chunk_limit() -> None:
     # 字符上限和读取字节上限分别校验，避免混淆两种单位。
     with pytest.raises(ValidationError, match="must be greater than zero"):
         Settings(markdown_chunk_max_characters=0, _env_file=None)
+
+
+def test_rejects_invalid_vector_settings() -> None:
+    """向量集合名和 Embedding 批大小在启动配置阶段就应失败。"""
+    with pytest.raises(ValidationError, match="must be non-empty"):
+        Settings(vector_collection_name=" ", _env_file=None)
+
+    with pytest.raises(ValidationError, match="EMBEDDING_BATCH_SIZE"):
+        Settings(embedding_batch_size=0, _env_file=None)

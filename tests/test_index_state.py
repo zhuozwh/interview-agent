@@ -1,5 +1,6 @@
 """验证 SQLite 增量索引状态的写入、更新、删除和重启恢复。"""
 
+import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,6 +8,8 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from interview_agent.retrieval import (
+    IndexPlan,
+    VectorIndexProfile,
     build_index_plan,
     load_markdown_documents,
     prepare_index_documents,
@@ -147,3 +150,35 @@ def test_end_to_end_incremental_cycle_is_unchanged_after_apply(
     )
     assert final_plan.change_count == 0
     assert len(final_plan.unchanged) == 1
+
+
+def test_vector_profile_recovers_after_restart_and_detects_corruption(
+    temporary_directory: Path,
+) -> None:
+    """向量配置与文档状态同属 SQLite，并用指纹发现手工损坏。"""
+    database = SQLiteDatabase(temporary_directory / "state.db")
+    store = SQLiteIndexStateStore(database)
+    store.initialize()
+    profile = VectorIndexProfile(
+        embedding_model="test-model-v1",
+        embedding_dimension=3,
+    )
+    empty_plan = IndexPlan(added=(), modified=(), unchanged=(), deleted=())
+
+    store.apply_plan(empty_plan, vector_profile=profile)
+    restarted = SQLiteIndexStateStore(database)
+    restarted.initialize()
+    assert restarted.load_vector_profile() == profile
+
+    with database.connection() as connection:
+        connection.execute(
+            """
+            UPDATE vector_index_profile
+            SET profile_fingerprint = ?
+            WHERE profile_key = 1
+            """,
+            ("0" * 64,),
+        )
+
+    with pytest.raises(sqlite3.DatabaseError, match="fingerprint"):
+        restarted.load_vector_profile()

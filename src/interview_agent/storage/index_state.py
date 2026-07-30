@@ -10,6 +10,7 @@ from interview_agent.retrieval.indexing import (
     StoredChunkState,
     StoredDocumentState,
 )
+from interview_agent.retrieval.vector_index import VectorIndexProfile
 from interview_agent.storage.sqlite import SQLiteDatabase
 
 
@@ -61,6 +62,22 @@ class SQLiteIndexStateStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_index_chunks_document_id
                 ON index_chunks(document_id)
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS vector_index_profile (
+                    profile_key INTEGER PRIMARY KEY CHECK(profile_key = 1),
+                    profile_fingerprint TEXT NOT NULL
+                        CHECK(length(profile_fingerprint) = 64),
+                    embedding_model TEXT NOT NULL,
+                    embedding_dimension INTEGER NOT NULL
+                        CHECK(embedding_dimension > 0),
+                    vector_store TEXT NOT NULL,
+                    distance_metric TEXT NOT NULL,
+                    format_version INTEGER NOT NULL CHECK(format_version > 0),
+                    updated_at TEXT NOT NULL
+                )
                 """
             )
 
@@ -136,8 +153,45 @@ class SQLiteIndexStateStore:
             for row in rows
         )
 
-    def apply_plan(self, plan: IndexPlan) -> None:
-        """在单个事务中删除失效状态，并替换新增或修改的文档状态。"""
+    def load_vector_profile(self) -> VectorIndexProfile | None:
+        """读取最后一次成功向量同步使用的模型和索引配置。"""
+        with self.database.connection() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    profile_fingerprint,
+                    embedding_model,
+                    embedding_dimension,
+                    vector_store,
+                    distance_metric,
+                    format_version
+                FROM vector_index_profile
+                WHERE profile_key = 1
+                """
+            ).fetchone()
+
+        if row is None:
+            return None
+        profile = VectorIndexProfile(
+            embedding_model=row[1],
+            embedding_dimension=row[2],
+            vector_store=row[3],
+            distance_metric=row[4],
+            format_version=row[5],
+        )
+        if row[0] != profile.fingerprint:
+            raise sqlite3.DatabaseError(
+                "Stored vector index profile fingerprint is invalid"
+            )
+        return profile
+
+    def apply_plan(
+        self,
+        plan: IndexPlan,
+        *,
+        vector_profile: VectorIndexProfile | None = None,
+    ) -> None:
+        """在单个事务中提交文档状态，并可同时提交向量配置。"""
         write_documents = (*plan.added, *plan.modified)
         _validate_plan_documents(write_documents)
 
@@ -150,6 +204,9 @@ class SQLiteIndexStateStore:
 
             for document in write_documents:
                 self._replace_document(connection, document)
+
+            if vector_profile is not None:
+                self._replace_vector_profile(connection, vector_profile)
 
     @staticmethod
     def _replace_document(
@@ -220,6 +277,43 @@ class SQLiteIndexStateStore:
                     chunk.fingerprint,
                 )
                 for chunk in document.chunks
+            ),
+        )
+
+    @staticmethod
+    def _replace_vector_profile(
+        connection: sqlite3.Connection,
+        profile: VectorIndexProfile,
+    ) -> None:
+        """与文档状态同事务保存最后一次成功的向量索引配置。"""
+        connection.execute(
+            """
+            INSERT INTO vector_index_profile (
+                profile_key,
+                profile_fingerprint,
+                embedding_model,
+                embedding_dimension,
+                vector_store,
+                distance_metric,
+                format_version,
+                updated_at
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            ON CONFLICT(profile_key) DO UPDATE SET
+                profile_fingerprint = excluded.profile_fingerprint,
+                embedding_model = excluded.embedding_model,
+                embedding_dimension = excluded.embedding_dimension,
+                vector_store = excluded.vector_store,
+                distance_metric = excluded.distance_metric,
+                format_version = excluded.format_version,
+                updated_at = excluded.updated_at
+            """,
+            (
+                profile.fingerprint,
+                profile.embedding_model,
+                profile.embedding_dimension,
+                profile.vector_store,
+                profile.distance_metric,
+                profile.format_version,
             ),
         )
 
