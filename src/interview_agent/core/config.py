@@ -43,6 +43,15 @@ class Settings(BaseSettings):
     vector_collection_name: str = "interview_agent_chunks"
     embedding_batch_size: int = 64
 
+    # Phase 1E 默认使用本地中文 ONNX 模型；首次运行可下载，之后可切到纯离线模式。
+    embedding_model_name: str = "BAAI/bge-small-zh-v1.5"
+    embedding_cache_directory: Path = Path("embedding_models")
+    embedding_local_files_only: bool = False
+
+    # Tool 级阈值和正文预算用于拒绝弱证据，并限制返回给后续 LLM 的上下文。
+    search_notes_min_score: float = 0.45
+    search_notes_max_total_characters: int = 6000
+
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
     @field_validator("log_level")
     @classmethod
@@ -87,14 +96,15 @@ class Settings(BaseSettings):
             )
         return value
 
-    @field_validator("vector_collection_name")
+    @field_validator("vector_collection_name", "embedding_model_name")
     @classmethod
     def require_non_empty_vector_name(cls, value: str) -> str:
-        """Chroma 集合名必须明确。"""
+        """Chroma 集合名和 Embedding 模型名都必须明确。"""
         normalized = value.strip()
         if not normalized or "\0" in normalized:
             raise ValueError(
-                "Vector collection name must be non-empty and contain no NUL"
+                "Vector collection and embedding model names must be non-empty "
+                "and contain no NUL"
             )
         return normalized
 
@@ -105,6 +115,25 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("EMBEDDING_BATCH_SIZE must be greater than zero")
         return value
+
+    @field_validator("search_notes_min_score")
+    @classmethod
+    def require_valid_search_score(cls, value: float) -> float:
+        """余弦相似度阈值只接受理论范围内的有限值。"""
+        if not -1.0 <= value <= 1.0:
+            raise ValueError("SEARCH_NOTES_MIN_SCORE must be between -1 and 1")
+        return value
+
+    @field_validator("search_notes_max_total_characters")
+    @classmethod
+    def require_positive_search_budget(cls, value: int) -> int:
+        """Tool 返回正文总预算必须为正数。"""
+        if not 1 <= value <= 20_000:
+            raise ValueError(
+                "SEARCH_NOTES_MAX_TOTAL_CHARACTERS must be between 1 and 20000"
+            )
+        return value
+
 
 # 缓存配置对象，保证同一进程通常只解析一次环境配置。
 @lru_cache

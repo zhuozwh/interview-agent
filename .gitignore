@@ -21,6 +21,7 @@ dist/
 *.sqlite3
 chroma_db/
 vector_index/
+embedding_models/
 *.faiss
 *.index
 logs/

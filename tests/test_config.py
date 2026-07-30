@@ -26,6 +26,11 @@ def test_default_settings_load() -> None:
     assert settings.vector_store_path == Path("vector_index")
     assert settings.vector_collection_name == "interview_agent_chunks"
     assert settings.embedding_batch_size == 64
+    assert settings.embedding_model_name == "BAAI/bge-small-zh-v1.5"
+    assert settings.embedding_cache_directory == Path("embedding_models")
+    assert settings.embedding_local_files_only is False
+    assert settings.search_notes_min_score == 0.45
+    assert settings.search_notes_max_total_characters == 6000
 
 
 def test_environment_variables_override_settings(monkeypatch) -> None:
@@ -47,6 +52,11 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("VECTOR_STORE_PATH", "temporary/vectors")
     monkeypatch.setenv("VECTOR_COLLECTION_NAME", "test_chunks")
     monkeypatch.setenv("EMBEDDING_BATCH_SIZE", "16")
+    monkeypatch.setenv("EMBEDDING_MODEL_NAME", "test/zh-model")
+    monkeypatch.setenv("EMBEDDING_CACHE_DIRECTORY", "temporary/models")
+    monkeypatch.setenv("EMBEDDING_LOCAL_FILES_ONLY", "true")
+    monkeypatch.setenv("SEARCH_NOTES_MIN_SCORE", "0.5")
+    monkeypatch.setenv("SEARCH_NOTES_MAX_TOTAL_CHARACTERS", "3000")
 
     # get_settings 使用了缓存；读取新环境变量前必须清除旧配置对象。
     get_settings.cache_clear()
@@ -72,6 +82,11 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.vector_store_path == Path("temporary/vectors")
     assert settings.vector_collection_name == "test_chunks"
     assert settings.embedding_batch_size == 16
+    assert settings.embedding_model_name == "test/zh-model"
+    assert settings.embedding_cache_directory == Path("temporary/models")
+    assert settings.embedding_local_files_only is True
+    assert settings.search_notes_min_score == 0.5
+    assert settings.search_notes_max_total_characters == 3000
 
 
 def test_rejects_empty_allowed_data_directories() -> None:
@@ -103,3 +118,18 @@ def test_rejects_invalid_vector_settings() -> None:
 
     with pytest.raises(ValidationError, match="EMBEDDING_BATCH_SIZE"):
         Settings(embedding_batch_size=0, _env_file=None)
+
+    with pytest.raises(ValidationError, match="must be non-empty"):
+        Settings(embedding_model_name=" ", _env_file=None)
+
+
+def test_rejects_invalid_search_notes_settings() -> None:
+    """拒绝超出余弦范围的阈值和非正数正文预算。"""
+    with pytest.raises(ValidationError, match="between -1 and 1"):
+        Settings(search_notes_min_score=1.1, _env_file=None)
+
+    with pytest.raises(ValidationError, match="between 1 and 20000"):
+        Settings(search_notes_max_total_characters=0, _env_file=None)
+
+    with pytest.raises(ValidationError, match="between 1 and 20000"):
+        Settings(search_notes_max_total_characters=20_001, _env_file=None)

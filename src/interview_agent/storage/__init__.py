@@ -7,6 +7,7 @@ from interview_agent.storage.chroma import (
 )
 from interview_agent.storage.index_state import SQLiteIndexStateStore
 from interview_agent.storage.sqlite import SQLiteDatabase
+from interview_agent.storage.tool_trace import SQLiteToolTraceStore
 
 __all__ = [
     "ChromaVectorDataError",
@@ -14,4 +15,5 @@ __all__ = [
     "ChromaVectorStoreError",
     "SQLiteDatabase",
     "SQLiteIndexStateStore",
+    "SQLiteToolTraceStore",
 ]

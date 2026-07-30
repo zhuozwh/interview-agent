@@ -6,13 +6,14 @@ build-backend = "setuptools.build_meta"
 # 项目基本信息和实际运行所需依赖。
 [project]
 name = "interview-agent"
-version = "0.2.3"
+version = "0.2.4"
 description = "Local AI agent foundation for technical learning and interview preparation."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "chromadb>=1.5,<2.0",
     "fastapi>=0.115,<1.0",
+    "fastembed>=0.8,<0.9",
     "pydantic>=2.9,<3.0",
     "pydantic-settings>=2.5,<3.0",
     "uvicorn>=0.30,<1.0",

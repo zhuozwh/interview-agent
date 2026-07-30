@@ -21,6 +21,10 @@ from interview_agent.retrieval.markdown import (
     MarkdownSizeError,
     load_markdown_documents,
 )
+from interview_agent.retrieval.fastembed_provider import (
+    FastEmbedConfigurationError,
+    FastEmbedEmbeddingProvider,
+)
 from interview_agent.retrieval.front_matter import (
     MarkdownFrontMatterError,
     reconstruct_document_content,
@@ -67,6 +71,8 @@ __all__ = [
     "EmbeddingProvider",
     "EmbeddingProviderError",
     "EmbeddingResponseError",
+    "FastEmbedConfigurationError",
+    "FastEmbedEmbeddingProvider",
     "IndexChunk",
     "IndexDocument",
     "IndexPlan",
