@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前版本为 **v0.2.7**，已完成 **Phase 1H：单 Tool Agent 最小闭环**。
+当前版本为 **v0.2.8**，已完成 **Phase 1I：项目与简历只读 Tool**。
 
 已实现：
 
@@ -43,12 +43,15 @@
 - 面向知识问答的确定性 Router、一次 Tool 调用和明确停止条件；
 - 问题、检索证据、LLM 回答和引用共享的请求追踪标识；
 - 模型引用白名单、完成状态、链接和绝对路径的输出校验；
+- `get_project_context` 项目资料只读语义检索；
+- `get_resume_context` 简历资料最小化检索和常见敏感字段脱敏；
+- `notes`、`projects`、`resume` 三个固定向量命名空间；
 - pytest 基础测试。
 
 尚未实现：
 
 - Front Matter 字段值的语义解析；
-- 其他两个初始 Tool、完整问答应用用例和 FastAPI 问答接口；
+- 三 Tool Agent 接线、完整问答应用用例和 FastAPI 问答接口；
 - Web 前端。
 
 ## 快速开始
@@ -85,6 +88,8 @@ python -m venv .venv
 
 ```dotenv
 MARKDOWN_SOURCE_DIRECTORY=knowledge/interview
+PROJECT_SOURCE_DIRECTORY=knowledge/projects
+RESUME_SOURCE_DIRECTORY=knowledge/resume
 ALLOWED_DATA_DIRECTORIES=["knowledge"]
 MARKDOWN_MAX_FILE_SIZE_BYTES=2097152
 MARKDOWN_MAX_TOTAL_SIZE_BYTES=20971520
@@ -97,6 +102,10 @@ EMBEDDING_CACHE_DIRECTORY=embedding_models
 EMBEDDING_LOCAL_FILES_ONLY=false
 SEARCH_NOTES_MIN_SCORE=0.58
 SEARCH_NOTES_MAX_TOTAL_CHARACTERS=6000
+PROJECT_CONTEXT_MIN_SCORE=0.58
+PROJECT_CONTEXT_MAX_TOTAL_CHARACTERS=6000
+RESUME_CONTEXT_MIN_SCORE=0.58
+RESUME_CONTEXT_MAX_TOTAL_CHARACTERS=3000
 RAG_CONTEXT_MAX_CHARACTERS=8000
 LLM_API_KEY=
 LLM_BASE_URL=https://api.deepseek.com
@@ -263,9 +272,20 @@ Phase 1H 的 `KnowledgeAgent` 建立了第一个真实 Agent 控制循环：
 6. 只接受正常完成、长度受控且引用全部来自本次检索的回答；
 7. 返回回答、实际使用的引用、Tool 调用 ID、LLM 请求 ID 和共同追踪 ID。
 
-当前 Router 对项目、简历和复盘意图采用保守拒绝，因为对应 Tool 尚未在 Phase 1H 实现。模型输出中的 `[S1]` 引用由代码映射回实际 `Citation`；未知、损坏或伪装成链接的引用会使整条回答失败。外部 URL、Markdown 链接和 Windows 绝对路径也不会直接进入最终回答，应用层后续只根据已验证引用生成来源展示。
+当前 Router 对项目、简历和复盘意图仍采用保守拒绝：Phase 1I 已实现项目与简历 Tool，但尚未接入 Phase 1H 的 Agent 控制循环。模型输出中的 `[S1]` 引用由代码映射回实际 `Citation`；未知、损坏或伪装成链接的引用会使整条回答失败。外部 URL、Markdown 链接和 Windows 绝对路径也不会直接进入最终回答，应用层后续只根据已验证引用生成来源展示。
 
 提示词集中在 `agent/prompts.py` 并带版本号。问题和证据都作为 JSON 数据放在固定系统规则之后；即使文档包含提示注入文本，也不能改变代码控制的工具白名单、调用次数和停止条件。LLM 仍可能生成质量不佳但引用格式合法的文本，这是当前已知边界；回答效果评测和必要的排序优化属于 Phase 2。
+
+Phase 1I 增加两个与 `search_notes` 同级的只读 Tool：
+
+- `get_project_context` 固定检索 `projects` 命名空间，只面向已经纳入数据源的项目说明、设计和实现状态；它不读取源码或 Git 历史，也不会根据文档空白推断功能已实现。
+- `get_resume_context` 固定检索 `resume` 命名空间，默认正文预算为 3000 字符；返回前会脱敏常见邮箱、中国大陆手机号、身份证号和微信/WeChat 账号，避免把联系方式发送给后续 LLM。
+
+三类数据源分别通过 `MARKDOWN_SOURCE_DIRECTORY`、`PROJECT_SOURCE_DIRECTORY` 和 `RESUME_SOURCE_DIRECTORY` 配置，但每个目录及其文件仍必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。索引时为三类文档分别传入 `notes`、`projects`、`resume` namespace，并将它们合并为同一次增量计划；Chroma 查询由 Tool 内部固定 namespace 过滤，调用方不能指定任意目录或跨资料类型检索。
+
+三个 Tool 共享 `ScopedSemanticSearchTool` 的输入校验、弱证据过滤、正文预算、错误映射和 SQLite 追踪。这个共享层在第三个真实 Tool 出现后才建立，不是为假设扩展预先设计的插件系统。Phase 1I 只交付 Tool 和数据边界；Router 在下一阶段接入它们。
+
+简历脱敏是发往 LLM 前的最小化保护，不是完整的数据防泄漏系统：当前只覆盖上述常见格式，不识别护照、银行卡号或任意自由文本中的隐私。原始简历片段和向量仍只保存在本机 Chroma 中；若未来接入其他远端服务，必须先补充对应的数据分类和脱敏策略。
 
 SQLite 只保存数据源命名空间、相对路径、指纹、标题路径、行号和向量配置，不保存 Markdown 正文及本机绝对路径。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
 

@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     # Markdown 源目录表示真正要扫描的文件夹；允许目录则是它不能越过的安全边界。
     # 使用元组而不是可变列表，避免应用运行期间意外改变读取白名单。
     markdown_source_directory: Path = Path("knowledge")
+    project_source_directory: Path = Path("knowledge/projects")
+    resume_source_directory: Path = Path("knowledge/resume")
     allowed_data_directories: tuple[Path, ...] = (Path("knowledge"),)
 
     # 两级字节上限分别限制单个文件和一次批量加载，防止意外读取超大目录。
@@ -52,6 +54,10 @@ class Settings(BaseSettings):
     # Tool 级阈值和正文预算用于拒绝弱证据，并限制返回给后续 LLM 的上下文。
     search_notes_min_score: float = 0.58
     search_notes_max_total_characters: int = 6000
+    project_context_min_score: float = 0.58
+    project_context_max_total_characters: int = 6000
+    resume_context_min_score: float = 0.58
+    resume_context_max_total_characters: int = 3000
 
     # RAG 预算覆盖 JSON 包络、引用元数据和正文，独立于 Tool 的正文预算。
     rag_context_max_characters: int = 8000
@@ -137,21 +143,45 @@ class Settings(BaseSettings):
             raise ValueError("EMBEDDING_BATCH_SIZE must be greater than zero")
         return value
 
-    @field_validator("search_notes_min_score")
+    @field_validator(
+        "search_notes_min_score",
+        "project_context_min_score",
+        "resume_context_min_score",
+        "search_notes_max_total_characters",
+        "project_context_max_total_characters",
+        "resume_context_max_total_characters",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_tool_numbers(cls, value):
+        """bool 是 int 的子类，但不能表达相似度或字符预算。"""
+        if isinstance(value, bool):
+            raise ValueError("Numeric Tool settings must not be boolean")
+        return value
+
+    @field_validator(
+        "search_notes_min_score",
+        "project_context_min_score",
+        "resume_context_min_score",
+    )
     @classmethod
     def require_valid_search_score(cls, value: float) -> float:
         """余弦相似度阈值只接受理论范围内的有限值。"""
         if not -1.0 <= value <= 1.0:
-            raise ValueError("SEARCH_NOTES_MIN_SCORE must be between -1 and 1")
+            raise ValueError("Tool minimum scores must be between -1 and 1")
         return value
 
-    @field_validator("search_notes_max_total_characters")
+    @field_validator(
+        "search_notes_max_total_characters",
+        "project_context_max_total_characters",
+        "resume_context_max_total_characters",
+    )
     @classmethod
     def require_positive_search_budget(cls, value: int) -> int:
         """Tool 返回正文总预算必须为正数。"""
         if not 1 <= value <= 20_000:
             raise ValueError(
-                "SEARCH_NOTES_MAX_TOTAL_CHARACTERS must be between 1 and 20000"
+                "Tool content budgets must be between 1 and 20000"
             )
         return value
 

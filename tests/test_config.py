@@ -19,6 +19,8 @@ def test_default_settings_load() -> None:
 
     # Phase 1A 的默认配置只面向仓库下的 knowledge 目录，并带有安全读取上限。
     assert settings.markdown_source_directory == Path("knowledge")
+    assert settings.project_source_directory == Path("knowledge/projects")
+    assert settings.resume_source_directory == Path("knowledge/resume")
     assert settings.allowed_data_directories == (Path("knowledge"),)
     assert settings.markdown_max_file_size_bytes == 2 * 1024 * 1024
     assert settings.markdown_max_total_size_bytes == 20 * 1024 * 1024
@@ -31,6 +33,10 @@ def test_default_settings_load() -> None:
     assert settings.embedding_local_files_only is False
     assert settings.search_notes_min_score == 0.58
     assert settings.search_notes_max_total_characters == 6000
+    assert settings.project_context_min_score == 0.58
+    assert settings.project_context_max_total_characters == 6000
+    assert settings.resume_context_min_score == 0.58
+    assert settings.resume_context_max_total_characters == 3000
     assert settings.rag_context_max_characters == 8000
     assert settings.llm_api_key is None
     assert settings.llm_base_url == "https://api.deepseek.com"
@@ -52,6 +58,8 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
 
     # 复杂类型使用 JSON 数组传入，模拟 .env 中允许多个数据目录的写法。
     monkeypatch.setenv("MARKDOWN_SOURCE_DIRECTORY", "temporary/notes")
+    monkeypatch.setenv("PROJECT_SOURCE_DIRECTORY", "temporary/projects")
+    monkeypatch.setenv("RESUME_SOURCE_DIRECTORY", "temporary/resume")
     monkeypatch.setenv(
         "ALLOWED_DATA_DIRECTORIES",
         '["temporary/notes", "temporary/projects"]',
@@ -67,6 +75,10 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("EMBEDDING_LOCAL_FILES_ONLY", "true")
     monkeypatch.setenv("SEARCH_NOTES_MIN_SCORE", "0.5")
     monkeypatch.setenv("SEARCH_NOTES_MAX_TOTAL_CHARACTERS", "3000")
+    monkeypatch.setenv("PROJECT_CONTEXT_MIN_SCORE", "0.4")
+    monkeypatch.setenv("PROJECT_CONTEXT_MAX_TOTAL_CHARACTERS", "3500")
+    monkeypatch.setenv("RESUME_CONTEXT_MIN_SCORE", "0.6")
+    monkeypatch.setenv("RESUME_CONTEXT_MAX_TOTAL_CHARACTERS", "2000")
     monkeypatch.setenv("RAG_CONTEXT_MAX_CHARACTERS", "5000")
     monkeypatch.setenv("LLM_API_KEY", "test-only-secret")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.com/v1")
@@ -92,6 +104,8 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.log_level == "DEBUG"
     assert settings.database_path == Path("temporary/test.db")
     assert settings.markdown_source_directory == Path("temporary/notes")
+    assert settings.project_source_directory == Path("temporary/projects")
+    assert settings.resume_source_directory == Path("temporary/resume")
     assert settings.allowed_data_directories == (
         Path("temporary/notes"),
         Path("temporary/projects"),
@@ -107,6 +121,10 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.embedding_local_files_only is True
     assert settings.search_notes_min_score == 0.5
     assert settings.search_notes_max_total_characters == 3000
+    assert settings.project_context_min_score == 0.4
+    assert settings.project_context_max_total_characters == 3500
+    assert settings.resume_context_min_score == 0.6
+    assert settings.resume_context_max_total_characters == 2000
     assert settings.rag_context_max_characters == 5000
     assert settings.llm_api_key.get_secret_value() == "test-only-secret"
     assert "test-only-secret" not in repr(settings)
@@ -167,6 +185,24 @@ def test_rejects_invalid_search_notes_settings() -> None:
 
     with pytest.raises(ValidationError, match="between 1 and 20000"):
         Settings(search_notes_max_total_characters=20_001, _env_file=None)
+
+    with pytest.raises(ValidationError, match="between -1 and 1"):
+        Settings(project_context_min_score=-1.1, _env_file=None)
+
+    with pytest.raises(ValidationError, match="between -1 and 1"):
+        Settings(resume_context_min_score=float("inf"), _env_file=None)
+
+    with pytest.raises(ValidationError, match="between 1 and 20000"):
+        Settings(project_context_max_total_characters=0, _env_file=None)
+
+    with pytest.raises(ValidationError, match="between 1 and 20000"):
+        Settings(resume_context_max_total_characters=20_001, _env_file=None)
+
+    with pytest.raises(ValidationError, match="must not be boolean"):
+        Settings(project_context_min_score=True, _env_file=None)
+
+    with pytest.raises(ValidationError, match="must not be boolean"):
+        Settings(resume_context_max_total_characters=False, _env_file=None)
 
 
 def test_rejects_invalid_rag_context_budget() -> None:
