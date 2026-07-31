@@ -67,6 +67,9 @@ class LocalInterviewRuntime:
         self.llm_client = llm_client
         self.sync_report = sync_report
         self._closed = False
+        # Phase 1 是本地单用户应用；串行化共享模型、Chroma 和 SQLite 的访问，
+        # 避免把第三方对象的线程安全当成未经验证的隐含前提。
+        self._execute_lock = Lock()
 
     def execute(
         self,
@@ -75,21 +78,23 @@ class LocalInterviewRuntime:
         session_id: str | None = None,
     ) -> AskResult:
         """把请求交给已经组装好的应用用例。"""
-        if self._closed:
-            raise ApplicationUnavailableError("The local runtime is closed.")
-        return self.use_case.execute(request, session_id=session_id)
+        with self._execute_lock:
+            if self._closed:
+                raise ApplicationUnavailableError("The local runtime is closed.")
+            return self.use_case.execute(request, session_id=session_id)
 
     def close(self) -> None:
         """幂等释放本地向量库和 LLM HTTP 客户端。"""
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            self.vector_store.close()
-        finally:
-            close_llm = getattr(self.llm_client, "close", None)
-            if callable(close_llm):
-                close_llm()
+        with self._execute_lock:
+            if self._closed:
+                return
+            self._closed = True
+            try:
+                self.vector_store.close()
+            finally:
+                close_llm = getattr(self.llm_client, "close", None)
+                if callable(close_llm):
+                    close_llm()
 
 
 class LazyLocalAskService:

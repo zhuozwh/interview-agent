@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前版本为 **v0.2.9**，已完成 **Phase 1J：三 Tool Agent 与本地 API 闭环**。
+当前版本为 **v0.3.0**，**Phase 1：可用的知识问答 MVP 已完成**。
 
 已实现：
 
@@ -90,6 +90,17 @@ python -m venv .venv
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
+
+后续使用现有 Obsidian Vault 时，不需要复制 Markdown 到仓库。可以直接把三个源目录指向 Vault 内职责互不重叠的文件夹，例如：
+
+```dotenv
+MARKDOWN_SOURCE_DIRECTORY=D:/Obsidian/面试/知识
+PROJECT_SOURCE_DIRECTORY=D:/Obsidian/面试/项目
+RESUME_SOURCE_DIRECTORY=D:/Obsidian/面试/简历
+ALLOWED_DATA_DIRECTORIES=["D:/Obsidian/面试"]
+```
+
+应用始终只读这些 Markdown；SQLite、Chroma 和模型缓存仍应配置到项目的本地运行目录，并由 `.gitignore` 排除。
 
 PowerShell 调试示例：
 
@@ -333,6 +344,20 @@ $env:EMBEDDING_CACHE_DIRECTORY="embedding_models"
 该验收在 `TemporaryDirectory` 中创建 Markdown、SQLite 和 Chroma 数据，只读取配置的本地模型缓存。
 
 源目录越界、符号链接解析后越界、扫描失败、Front Matter 未闭合、UTF-8 解码失败或内容超过上限都会抛出明确异常，不会静默跳过失败文件。
+
+## Phase 1 验收与已知边界
+
+v0.3.0 收口时，默认离线测试为 **220 passed、2 skipped**；显式启用真实本地 Embedding 后另有 **1 passed**。完整集成验收在自动清理的临时目录中贯通三类 Markdown、增量索引、Chroma、三个 Tool、Router、RAG、LLM 替身、SQLite 会话/调用追踪和 FastAPI，并覆盖知识、项目、简历、面试复盘四类请求。真实 LLM 验收默认跳过，因为它需要本地密钥、网络并会产生远端调用。
+
+当前已知边界：
+
+- Router 使用可解释的固定关键词，不处理复杂多意图或开放式规划；
+- 一次请求最多使用一个只读 Tool；无可靠证据时停止，不自动扩大检索链；
+- 本地共享运行时按单用户模型串行执行，第一次 `/ask` 还会同步索引；
+- 常见个人信息脱敏不是完整 DLP，不覆盖护照、银行卡或任意自由文本隐私；
+- 引用校验能证明来源确实来自本次检索，但不能自动证明每句话都被证据语义蕴含；
+- 项目和简历阈值尚未经过 Phase 2 扩大评测集校准；
+- 真实 LLM 的回答质量、费用和供应方可用性需要在用户显式启用后验收。
 
 ## 项目文档
 
