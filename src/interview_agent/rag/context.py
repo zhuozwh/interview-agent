@@ -10,18 +10,24 @@ from numbers import Real
 from pathlib import PurePosixPath, PureWindowsPath
 from uuid import UUID
 
-from interview_agent.tools import (
-    SearchNotesError,
-    SearchNotesEvidence,
-    SearchNotesResponse,
-    SearchNotesStatus,
+from interview_agent.tools.scoped_search import (
+    ScopedSearchError,
+    ScopedSearchEvidence,
+    ScopedSearchResponse,
+    ScopedSearchStatus,
 )
 
 DEFAULT_RAG_CONTEXT_MAX_CHARACTERS = 8_000
 MIN_RAG_CONTEXT_MAX_CHARACTERS = 512
 MAX_RAG_CONTEXT_MAX_CHARACTERS = 50_000
-MAX_SEARCH_NOTES_CONTEXT_RESULTS = 10
-MAX_SEARCH_NOTES_CONTENT_CHARACTERS = 20_000
+MAX_SCOPED_CONTEXT_RESULTS = 10
+MAX_SCOPED_CONTENT_CHARACTERS = 20_000
+# 三个 Tool 名称和 namespace 是代码权限边界，不接受调用方自由组合。
+_TOOL_NAMESPACES = {
+    "search_notes": "notes",
+    "get_project_context": "projects",
+    "get_resume_context": "resume",
+}
 MAX_REFERENCE_PATH_CHARACTERS = 2_048
 MAX_HEADING_CHARACTERS = 500
 
@@ -102,23 +108,46 @@ class RagContext:
 
 
 def build_search_notes_context(
-    response: SearchNotesResponse,
+    response: ScopedSearchResponse,
     *,
     max_characters: int = DEFAULT_RAG_CONTEXT_MAX_CHARACTERS,
 ) -> RagContext:
-    """把 search_notes 响应转换为严格受预算约束的 JSON 证据上下文。"""
-    _validate_budget(max_characters)
-    _validate_response_identity(response)
+    """兼容已发布接口，把 search_notes 响应转换为 RAG 上下文。"""
+    return build_scoped_search_context(
+        response,
+        expected_tool_name="search_notes",
+        max_characters=max_characters,
+    )
 
-    if response.status is not SearchNotesStatus.SUCCESS:
+
+def build_scoped_search_context(
+    response: ScopedSearchResponse,
+    *,
+    expected_tool_name: str,
+    max_characters: int = DEFAULT_RAG_CONTEXT_MAX_CHARACTERS,
+) -> RagContext:
+    """把固定白名单 Tool 的响应转换为严格受预算约束的 JSON 证据。"""
+    _validate_budget(max_characters)
+    expected_namespace = _TOOL_NAMESPACES.get(expected_tool_name)
+    if expected_namespace is None:
+        raise RagContextInputError("expected_tool_name is not a supported Tool")
+    _validate_response_identity(
+        response,
+        expected_tool_name=expected_tool_name,
+    )
+
+    if response.status is not ScopedSearchStatus.SUCCESS:
         return _build_empty_context(response, max_characters=max_characters)
 
     if response.error is not None or not response.results:
         raise RagContextInputError(
-            "Successful search_notes response must contain results and no error"
+            "Successful scoped search response must contain results and no error"
         )
 
-    evidence = _normalize_evidence(response.results)
+    evidence = _normalize_evidence(
+        response.results,
+        expected_namespace=expected_namespace,
+    )
     blocks: list[EvidenceBlock] = []
     locally_truncated = False
 
@@ -154,7 +183,7 @@ def build_search_notes_context(
 
     if not blocks:
         raise RagContextInputError(
-            "Successful search_notes response produced no usable evidence"
+            "Successful scoped search response produced no usable evidence"
         )
 
     rendered = _render(RagContextStatus.READY, tuple(blocks))
@@ -187,27 +216,27 @@ def build_search_notes_context(
 
 
 def _build_empty_context(
-    response: SearchNotesResponse,
+    response: ScopedSearchResponse,
     *,
     max_characters: int,
 ) -> RagContext:
     """把无结果和 Tool 错误保留为不同状态，避免调用方误判为可靠空答案。"""
     if response.results:
         raise RagContextInputError(
-            "Non-success search_notes response must not contain results"
+            "Non-success scoped search response must not contain results"
         )
 
-    if response.status is SearchNotesStatus.NO_RESULTS:
+    if response.status is ScopedSearchStatus.NO_RESULTS:
         if response.error is not None:
             raise RagContextInputError(
-                "No-results search_notes response must not contain an error"
+                "No-results scoped search response must not contain an error"
             )
         status = RagContextStatus.NO_EVIDENCE
         error_code = None
     else:
         if response.error is None:
             raise RagContextInputError(
-                "Failed search_notes response must contain a stable error"
+                "Failed scoped search response must contain a stable error"
             )
         status = RagContextStatus.TOOL_ERROR
         error_code = response.error.code
@@ -233,12 +262,33 @@ def _build_empty_context(
 
 
 def _normalize_evidence(
-    results: tuple[SearchNotesEvidence, ...],
-) -> tuple[SearchNotesEvidence, ...]:
+    results: tuple[ScopedSearchEvidence, ...],
+    *,
+    expected_namespace: str,
+) -> tuple[ScopedSearchEvidence, ...]:
     """校验证据、稳定排序并只折叠完全相同的重复片段。"""
-    unique_by_chunk: dict[str, SearchNotesEvidence] = {}
+    unique_by_chunk: dict[str, ScopedSearchEvidence] = {}
+    source_by_document_id: dict[str, tuple[str, str]] = {}
+    document_id_by_source: dict[tuple[str, str], str] = {}
     for item in results:
-        _validate_evidence(item)
+        _validate_evidence(item, expected_namespace=expected_namespace)
+        source = (item.source_namespace, item.relative_path)
+        previous_source = source_by_document_id.setdefault(
+            item.document_id,
+            source,
+        )
+        if previous_source != source:
+            raise RagContextInputError(
+                "One document_id cannot identify multiple source paths"
+            )
+        previous_document_id = document_id_by_source.setdefault(
+            source,
+            item.document_id,
+        )
+        if previous_document_id != item.document_id:
+            raise RagContextInputError(
+                "One source path cannot identify multiple documents"
+            )
         previous = unique_by_chunk.get(item.chunk_id)
         if previous is None:
             unique_by_chunk[item.chunk_id] = item
@@ -259,27 +309,35 @@ def _normalize_evidence(
             "Evidence ranks must be unique and contiguous from 1"
         )
     if sum(len(item.content) for item in normalized) > (
-        MAX_SEARCH_NOTES_CONTENT_CHARACTERS
+        MAX_SCOPED_CONTENT_CHARACTERS
     ):
         raise RagContextInputError(
-            "Evidence content exceeds the search_notes response boundary"
+            "Evidence content exceeds the scoped search response boundary"
         )
     return normalized
 
 
-def _validate_response_identity(response: object) -> None:
+def _validate_response_identity(
+    response: object,
+    *,
+    expected_tool_name: str,
+) -> None:
     """拒绝伪造 Tool 名称、状态和追踪身份。"""
-    if not isinstance(response, SearchNotesResponse):
-        raise RagContextInputError("response must be a SearchNotesResponse")
-    if response.tool_name != "search_notes":
-        raise RagContextInputError("response tool_name must be search_notes")
-    if not isinstance(response.status, SearchNotesStatus):
-        raise RagContextInputError("response status must be a SearchNotesStatus")
+    if not isinstance(response, ScopedSearchResponse):
+        raise RagContextInputError("response must be a ScopedSearchResponse")
+    if response.tool_name != expected_tool_name:
+        raise RagContextInputError(
+            "response tool_name does not match the expected Tool"
+        )
+    if not isinstance(response.status, ScopedSearchStatus):
+        raise RagContextInputError(
+            "response status must be a ScopedSearchStatus"
+        )
     if not isinstance(response.results, tuple):
         raise RagContextInputError("response results must be a tuple")
-    if len(response.results) > MAX_SEARCH_NOTES_CONTEXT_RESULTS:
+    if len(response.results) > MAX_SCOPED_CONTEXT_RESULTS:
         raise RagContextInputError(
-            "response contains too many search_notes results"
+            "response contains too many scoped search results"
         )
     if (
         isinstance(response.duration_ms, bool)
@@ -290,9 +348,9 @@ def _validate_response_identity(response: object) -> None:
             "response duration_ms must be a non-negative integer"
         )
     if response.error is not None:
-        if not isinstance(response.error, SearchNotesError):
+        if not isinstance(response.error, ScopedSearchError):
             raise RagContextInputError(
-                "response error must be a SearchNotesError"
+                "response error must be a ScopedSearchError"
             )
         if not isinstance(response.error.code, str):
             raise RagContextInputError("response error code must be a string")
@@ -313,11 +371,15 @@ def _validate_response_identity(response: object) -> None:
     _require_uuid(response.tool_call_id, "tool_call_id")
 
 
-def _validate_evidence(item: object) -> None:
+def _validate_evidence(
+    item: object,
+    *,
+    expected_namespace: str,
+) -> None:
     """对跨越 Tool 边界的来源、位置和正文做防御性校验。"""
-    if not isinstance(item, SearchNotesEvidence):
+    if not isinstance(item, ScopedSearchEvidence):
         raise RagContextInputError(
-            "search_notes results must contain SearchNotesEvidence"
+            "scoped search results must contain ScopedSearchEvidence"
         )
     if (
         isinstance(item.rank, bool)
@@ -333,9 +395,9 @@ def _validate_evidence(item: object) -> None:
         raise RagContextInputError(
             "search_notes evidence must use the markdown source type"
         )
-    if item.source_namespace != "notes":
+    if item.source_namespace != expected_namespace:
         raise RagContextInputError(
-            "search_notes evidence must use the notes namespace"
+            "scoped search evidence does not match the Tool namespace"
         )
     _require_safe_relative_path(item.relative_path)
     if (
@@ -380,7 +442,7 @@ def _validate_evidence(item: object) -> None:
     if (
         not isinstance(item.content, str)
         or not item.content
-        or len(item.content) > MAX_SEARCH_NOTES_CONTENT_CHARACTERS
+        or len(item.content) > MAX_SCOPED_CONTENT_CHARACTERS
         or not _is_valid_utf8(item.content)
     ):
         raise RagContextInputError("Evidence content must be a non-empty string")
@@ -389,7 +451,7 @@ def _validate_evidence(item: object) -> None:
 
 
 def _citation_from_evidence(
-    item: SearchNotesEvidence,
+    item: ScopedSearchEvidence,
     position: int,
 ) -> Citation:
     """按最终上下文顺序分配稳定引用编号。"""

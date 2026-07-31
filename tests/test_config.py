@@ -18,7 +18,7 @@ def test_default_settings_load() -> None:
     assert settings.database_path == Path("data/interview_agent.db")
 
     # Phase 1A 的默认配置只面向仓库下的 knowledge 目录，并带有安全读取上限。
-    assert settings.markdown_source_directory == Path("knowledge")
+    assert settings.markdown_source_directory == Path("knowledge/interview")
     assert settings.project_source_directory == Path("knowledge/projects")
     assert settings.resume_source_directory == Path("knowledge/resume")
     assert settings.allowed_data_directories == (Path("knowledge"),)

@@ -11,6 +11,7 @@ from interview_agent.rag.context import (
     RagContextError,
     RagContextInputError,
     RagContextStatus,
+    build_scoped_search_context,
     build_search_notes_context,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "RagContextError",
     "RagContextInputError",
     "RagContextStatus",
+    "build_scoped_search_context",
     "build_search_notes_context",
 ]

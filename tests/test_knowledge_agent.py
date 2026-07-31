@@ -177,8 +177,16 @@ class IntegrationEmbedding:
     ("question", "intent", "tool_name"),
     [
         ("智能指针如何工作？", AgentIntent.KNOWLEDGE_QUESTION, "search_notes"),
-        ("我的项目为什么使用事件循环？", AgentIntent.PROJECT_CONTEXT, None),
-        ("我的简历里有哪些 C++ 经历？", AgentIntent.RESUME_CONTEXT, None),
+        (
+            "我的项目为什么使用事件循环？",
+            AgentIntent.PROJECT_CONTEXT,
+            "get_project_context",
+        ),
+        (
+            "我的简历里有哪些 C++ 经历？",
+            AgentIntent.RESUME_CONTEXT,
+            "get_resume_context",
+        ),
         ("复盘这场面试的不足", AgentIntent.INTERVIEW_REVIEW, None),
     ],
 )
@@ -351,6 +359,11 @@ def test_invalid_input_never_calls_tool_or_llm(
         (_llm_response("外部链接 https://example.com [S1]"), "unsafe_answer_link"),
         (_llm_response("伪造 [来源](fake.md)。[S1]"), "unsafe_answer_link"),
         (_llm_response("本机 D:\\private\\note.md。[S1]"), "unsafe_answer_link"),
+        (_llm_response("本机 /home/user/note.md。[S1]"), "unsafe_answer_link"),
+        (
+            _llm_response("共享目录 \\\\server\\private\\note.md。[S1]"),
+            "unsafe_answer_link",
+        ),
         (_llm_response("有效引用。[S1] 以及损坏引用 [S2"), "malformed_citation"),
         (_llm_response("答案。[S1]", finish_reason="length"), "incomplete_llm_output"),
         (_llm_response("答" * 8_001 + "[S1]"), "invalid_answer_content"),

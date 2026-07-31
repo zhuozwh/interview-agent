@@ -263,10 +263,29 @@ def test_rejects_forged_response_that_exceeds_tool_protocol() -> None:
 
     non_contiguous = (
         _evidence(rank=1, chunk_id="chunk-1"),
-        _evidence(rank=3, chunk_id="chunk-3"),
+        _evidence(
+            rank=3,
+            chunk_id="chunk-3",
+            relative_path="other.md",
+        ),
     )
     with pytest.raises(RagContextInputError, match="contiguous"):
         build_search_notes_context(_response(*non_contiguous))
+
+    first_source = _evidence(rank=1, chunk_id="chunk-a")
+    forged_document_mapping = (
+        first_source,
+        replace(
+            _evidence(
+                rank=2,
+                chunk_id="chunk-b",
+                relative_path="other.md",
+            ),
+            document_id=first_source.document_id,
+        ),
+    )
+    with pytest.raises(RagContextInputError, match="document_id"):
+        build_search_notes_context(_response(*forged_document_mapping))
 
     invalid_unicode = _evidence(content="\ud800")
     with pytest.raises(RagContextInputError, match="content"):
@@ -296,7 +315,7 @@ def test_rejects_forged_response_that_exceeds_tool_protocol() -> None:
         ),
         error=object(),
     )
-    with pytest.raises(RagContextInputError, match="SearchNotesError"):
+    with pytest.raises(RagContextInputError, match="ScopedSearchError"):
         build_search_notes_context(forged_error_response)
 
 

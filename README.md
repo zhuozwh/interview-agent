@@ -6,12 +6,12 @@
 
 ## 当前阶段
 
-当前版本为 **v0.2.8**，已完成 **Phase 1I：项目与简历只读 Tool**。
+当前版本为 **v0.2.9**，已完成 **Phase 1J：三 Tool Agent 与本地 API 闭环**。
 
 已实现：
 
 - Python 模块化单体工程骨架；
-- FastAPI 服务与 `GET /health`；
+- FastAPI 服务、`GET /health` 与 `POST /ask`；
 - 环境变量配置和标准日志；
 - SQLite 连接基础设施；
 - 配置允许目录内的 Markdown 递归发现和 UTF-8 只读加载；
@@ -46,12 +46,19 @@
 - `get_project_context` 项目资料只读语义检索；
 - `get_resume_context` 简历资料最小化检索和常见敏感字段脱敏；
 - `notes`、`projects`、`resume` 三个固定向量命名空间；
-- pytest 基础测试。
+- 三类资料互不重叠的真实路径校验和一次增量索引同步；
+- 项目、简历和知识问题各选择一个最小只读 Tool；
+- 面试记录脱敏后的无 Tool 复盘，以及固定四部分输出校验；
+- 回答证据强度提示和按意图生成的安全追问建议；
+- 应用用例统一生成会话与追踪标识；
+- SQLite 保存不含问题、证据、回答正文的会话和 Agent 调用摘要；
+- 第一次 `/ask` 时延迟加载本地模型、同步索引并组装运行时；
+- 从 Markdown 到 FastAPI 响应的完整本地集成测试。
 
 尚未实现：
 
 - Front Matter 字段值的语义解析；
-- 三 Tool Agent 接线、完整问答应用用例和 FastAPI 问答接口；
+- Phase 2 的扩大评测集、混合检索或重排序；
 - Web 前端。
 
 ## 快速开始
@@ -78,9 +85,27 @@ python -m venv .venv
 .\.venv\Scripts\python -m pytest
 ```
 
-应用默认监听 `http://127.0.0.1:8000`，健康检查地址为 `http://127.0.0.1:8000/health`。
+应用默认监听 `http://127.0.0.1:8000`，健康检查地址为 `http://127.0.0.1:8000/health`，问答接口和可视化调试文档分别为 `POST /ask` 与 `GET /docs`。
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
+
+使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
+
+PowerShell 调试示例：
+
+```powershell
+$body = @{
+    question = "智能指针如何体现 RAII？"
+} | ConvertTo-Json
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://127.0.0.1:8000/ask" `
+    -ContentType "application/json" `
+    -Body $body
+```
+
+面试复盘在同一接口增加 `interview_record` 字段。缺少 LLM 密钥、数据源目录、索引或模型配置时，`/ask` 返回 503，但 `/health` 不会触发模型下载或远程调用，仍可用于确认进程存活。
 
 ## Markdown 只读加载、增量向量索引与检索
 
@@ -262,17 +287,17 @@ $env:LLM_API_KEY="<仅在当前终端设置的测试密钥>"
 
 真实验收只发送公开的 RAII 基础问题，不读取或发送 Vault、简历、文件路径和本机运行数据。
 
-Phase 1H 的 `KnowledgeAgent` 建立了第一个真实 Agent 控制循环：
+Phase 1H 的 `KnowledgeAgent` 先用 `search_notes` 建立了第一个真实 Agent 控制循环：
 
 1. 校验问题并生成或接受规范 UUID `trace_id`；
 2. 确定性 Router 识别知识问答、项目、简历和面试复盘意图；
-3. 知识问答只调用一次 `search_notes`，不允许模型发明工具或参数；
+3. 当时的知识问答只调用一次 `search_notes`，不允许模型发明工具或参数；
 4. 无证据、Tool 故障和不支持意图立即停止，不调用 LLM 猜测；
 5. 有证据时构建防注入 RAG JSON，再调用一次 LLM；
 6. 只接受正常完成、长度受控且引用全部来自本次检索的回答；
 7. 返回回答、实际使用的引用、Tool 调用 ID、LLM 请求 ID 和共同追踪 ID。
 
-当前 Router 对项目、简历和复盘意图仍采用保守拒绝：Phase 1I 已实现项目与简历 Tool，但尚未接入 Phase 1H 的 Agent 控制循环。模型输出中的 `[S1]` 引用由代码映射回实际 `Citation`；未知、损坏或伪装成链接的引用会使整条回答失败。外部 URL、Markdown 链接和 Windows 绝对路径也不会直接进入最终回答，应用层后续只根据已验证引用生成来源展示。
+Phase 1J 已把 Router 接到三个只读 Tool：知识、项目和简历问题分别固定选择 `search_notes`、`get_project_context` 或 `get_resume_context`，一次请求最多调用其中一个。模型输出中的 `[S1]` 引用由代码映射回实际 `Citation`；未知、损坏或伪装成链接的引用会使整条回答失败。外部 URL、Markdown 链接以及 Windows、UNC、POSIX 绝对路径也不会直接进入最终回答，API 只根据已验证引用生成来源展示。
 
 提示词集中在 `agent/prompts.py` 并带版本号。问题和证据都作为 JSON 数据放在固定系统规则之后；即使文档包含提示注入文本，也不能改变代码控制的工具白名单、调用次数和停止条件。LLM 仍可能生成质量不佳但引用格式合法的文本，这是当前已知边界；回答效果评测和必要的排序优化属于 Phase 2。
 
@@ -283,9 +308,15 @@ Phase 1I 增加两个与 `search_notes` 同级的只读 Tool：
 
 三类数据源分别通过 `MARKDOWN_SOURCE_DIRECTORY`、`PROJECT_SOURCE_DIRECTORY` 和 `RESUME_SOURCE_DIRECTORY` 配置，但每个目录及其文件仍必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。索引时为三类文档分别传入 `notes`、`projects`、`resume` namespace，并将它们合并为同一次增量计划；Chroma 查询由 Tool 内部固定 namespace 过滤，调用方不能指定任意目录或跨资料类型检索。
 
-三个 Tool 共享 `ScopedSemanticSearchTool` 的输入校验、弱证据过滤、正文预算、错误映射和 SQLite 追踪。这个共享层在第三个真实 Tool 出现后才建立，不是为假设扩展预先设计的插件系统。Phase 1I 只交付 Tool 和数据边界；Router 在下一阶段接入它们。
+三个 Tool 共享 `ScopedSemanticSearchTool` 的输入校验、弱证据过滤、正文预算、错误映射和 SQLite 追踪。这个共享层在第三个真实 Tool 出现后才建立，不是为假设扩展预先设计的插件系统。
 
 简历脱敏是发往 LLM 前的最小化保护，不是完整的数据防泄漏系统：当前只覆盖上述常见格式，不识别护照、银行卡号或任意自由文本中的隐私。原始简历片段和向量仍只保存在本机 Chroma 中；若未来接入其他远端服务，必须先补充对应的数据分类和脱敏策略。
+
+Phase 1J 增加应用层和 HTTP 闭环。`AskInterviewAgentUseCase` 为每次请求生成 `trace_id`，为连续请求生成或复用规范 `session_id`，调用 Agent 后把状态、意图、路由原因、Tool/LLM 标识、引用编号、耗时和输入长度写入 SQLite；问题、面试记录、证据和回答正文均不落入追踪表。追踪写入失败时不会继续返回未审计的成功回答。
+
+面试复盘不需要把用户记录伪装成知识库 Tool。调用方显式提供 `interview_record` 后，代码先对问题和记录中的常见联系方式脱敏，再进行一次 LLM 调用；结果必须按“问题归纳、回答表现、暴露短板、后续行动”四部分输出，并且不能生成知识库引用、外部链接或绝对路径。只有“请复盘”但没有记录时会在本地停止，不让模型猜测一场不存在的面试。
+
+实际 `/ask` 流程为：校验 HTTP 数据 → 应用层建立会话和追踪 → Router 选择零个或一个 Tool → 本地 Embedding/Chroma 检索 → RAG 证据校验与限长 → 一次 LLM 调用 → 回答/引用校验 → SQLite 安全摘要 → HTTP 响应。高置信提示只表示本次回答实际引用了至少两个不同来源文件，不是模型正确率；复盘没有外部证据评分，因此标记为 `not_applicable`。
 
 SQLite 只保存数据源命名空间、相对路径、指纹、标题路径、行号和向量配置，不保存 Markdown 正文及本机绝对路径。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
 

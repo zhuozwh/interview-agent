@@ -1,5 +1,6 @@
 """SQLite 和 Chroma 等本地存储基础设施。"""
 
+from interview_agent.storage.agent_trace import SQLiteAgentTraceStore
 from interview_agent.storage.chroma import (
     ChromaVectorDataError,
     ChromaVectorStore,
@@ -14,6 +15,7 @@ __all__ = [
     "ChromaVectorStore",
     "ChromaVectorStoreError",
     "SQLiteDatabase",
+    "SQLiteAgentTraceStore",
     "SQLiteIndexStateStore",
     "SQLiteToolTraceStore",
 ]

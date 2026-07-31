@@ -33,28 +33,40 @@ _PROJECT_MARKERS = (
 )
 
 
-def route_question(question: str) -> AgentRoute:
+def route_question(
+    question: str,
+    *,
+    has_interview_record: bool = False,
+) -> AgentRoute:
     """优先识别个人资料任务，其余问题使用面试笔记检索。"""
     if not isinstance(question, str) or not question.strip():
         raise ValueError("question must be a non-empty string")
+    if not isinstance(has_interview_record, bool):
+        raise ValueError("has_interview_record must be a boolean")
     normalized = question.casefold()
+    if has_interview_record:
+        return AgentRoute(
+            intent=AgentIntent.INTERVIEW_REVIEW,
+            tool_name=None,
+            reason_code="provided_interview_record_requires_review",
+        )
     if any(marker in normalized for marker in _REVIEW_MARKERS):
         return AgentRoute(
             intent=AgentIntent.INTERVIEW_REVIEW,
             tool_name=None,
-            reason_code="interview_review_tool_unavailable",
+            reason_code="interview_review_requires_record",
         )
     if any(marker in normalized for marker in _RESUME_MARKERS):
         return AgentRoute(
             intent=AgentIntent.RESUME_CONTEXT,
-            tool_name=None,
-            reason_code="resume_tool_unavailable",
+            tool_name="get_resume_context",
+            reason_code="resume_question_requires_resume_context",
         )
     if any(marker in normalized for marker in _PROJECT_MARKERS):
         return AgentRoute(
             intent=AgentIntent.PROJECT_CONTEXT,
-            tool_name=None,
-            reason_code="project_tool_unavailable",
+            tool_name="get_project_context",
+            reason_code="project_question_requires_project_context",
         )
     return AgentRoute(
         intent=AgentIntent.KNOWLEDGE_QUESTION,

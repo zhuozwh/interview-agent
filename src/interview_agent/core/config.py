@@ -29,7 +29,7 @@ class Settings(BaseSettings):
 
     # Markdown 源目录表示真正要扫描的文件夹；允许目录则是它不能越过的安全边界。
     # 使用元组而不是可变列表，避免应用运行期间意外改变读取白名单。
-    markdown_source_directory: Path = Path("knowledge")
+    markdown_source_directory: Path = Path("knowledge/interview")
     project_source_directory: Path = Path("knowledge/projects")
     resume_source_directory: Path = Path("knowledge/resume")
     allowed_data_directories: tuple[Path, ...] = (Path("knowledge"),)

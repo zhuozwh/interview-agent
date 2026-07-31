@@ -30,11 +30,21 @@ class AgentStatus(StrEnum):
     INTERNAL_ERROR = "internal_error"
 
 
+class AgentConfidence(StrEnum):
+    """向交互层解释回答证据强度，而不是模型主观概率。"""
+
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+    NOT_APPLICABLE = "not_applicable"
+
+
 @dataclass(frozen=True, slots=True)
 class AgentRequest:
-    """最小 Agent 输入；当前不接受调用方指定工具或文件路径。"""
+    """最小 Agent 输入；调用方不能指定工具、namespace 或文件路径。"""
 
     question: str
+    interview_record: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,3 +78,5 @@ class AgentResponse:
     tool_call_ids: tuple[str, ...]
     llm_request_id: str | None
     error: AgentError | None
+    confidence: AgentConfidence | None = None
+    follow_up_questions: tuple[str, ...] = ()

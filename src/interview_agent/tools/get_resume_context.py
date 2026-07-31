@@ -1,7 +1,6 @@
 """提供最小暴露、只读且可追踪的简历资料检索 Tool。"""
 
-import re
-
+from interview_agent.core.privacy import redact_common_personal_data
 from interview_agent.retrieval import (
     EmbeddingProvider,
     VectorIndexStateStore,
@@ -21,18 +20,6 @@ from interview_agent.tools.scoped_search import (
 
 GET_RESUME_CONTEXT_TOOL_NAME = "get_resume_context"
 RESUME_SOURCE_NAMESPACE = "resume"
-
-_EMAIL_PATTERN = re.compile(
-    r"(?<![\w.+-])[\w.+-]+@[\w-]+(?:\.[\w-]+)+(?![\w.-])",
-    re.UNICODE,
-)
-_PHONE_PATTERN = re.compile(
-    r"(?<!\d)(?:\+?86[- ]?)?1[3-9]\d(?:[- ]?\d){8}(?!\d)"
-)
-_IDENTITY_CARD_PATTERN = re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)")
-_MESSAGING_ID_PATTERN = re.compile(
-    r"(?i)(?P<label>微信|wechat|wx)\s*[:：]\s*[A-Za-z0-9_-]{5,64}"
-)
 
 GetResumeContextStatus = ScopedSearchStatus
 GetResumeContextRequest = ScopedSearchRequest
@@ -58,7 +45,7 @@ class GetResumeContextTool(ScopedSemanticSearchTool):
             policy=ScopedSearchPolicy(
                 tool_name=GET_RESUME_CONTEXT_TOOL_NAME,
                 source_namespace=RESUME_SOURCE_NAMESPACE,
-                content_transform=_redact_resume_sensitive_data,
+                content_transform=redact_common_personal_data,
             ),
             embedding_provider=embedding_provider,
             vector_store=vector_store,
@@ -67,19 +54,6 @@ class GetResumeContextTool(ScopedSemanticSearchTool):
             min_score=min_score,
             max_total_characters=max_total_characters,
         )
-
-
-def _redact_resume_sensitive_data(content: str) -> str:
-    """在正文离开 Tool 前移除常见联系方式和中国身份证号。"""
-    redacted = _EMAIL_PATTERN.sub("[REDACTED_EMAIL]", content)
-    redacted = _PHONE_PATTERN.sub("[REDACTED_PHONE]", redacted)
-    redacted = _IDENTITY_CARD_PATTERN.sub("[REDACTED_ID]", redacted)
-    return _MESSAGING_ID_PATTERN.sub(
-        lambda match: f"{match.group('label')}：[REDACTED_ACCOUNT]",
-        redacted,
-    )
-
-
 __all__ = [
     "GET_RESUME_CONTEXT_TOOL_NAME",
     "RESUME_SOURCE_NAMESPACE",
