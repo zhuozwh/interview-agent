@@ -31,7 +31,7 @@ def _trace() -> ToolTraceRecord:
         status="success",
         result_count=1,
         parameters=(
-            ("min_score", 0.45),
+            ("min_score", 0.58),
             ("query_length", 8),
             ("top_k", 5),
         ),

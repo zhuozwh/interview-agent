@@ -219,7 +219,7 @@ def test_weak_results_become_explicit_no_results_and_content_is_bounded(
         (SearchNotesRequest(query=" "), "invalid_query"),
         (SearchNotesRequest(query="问题", top_k=0), "invalid_top_k"),
         (SearchNotesRequest(query="问题", top_k=11), "invalid_top_k"),
-        (SearchNotesRequest(query="问" * 501), "query_too_long"),
+        (SearchNotesRequest(query="问" * 481), "query_too_long"),
     ],
 )
 def test_invalid_input_returns_stable_error_and_is_traced(

@@ -7,8 +7,9 @@ from pathlib import Path
 
 from interview_agent.retrieval.markdown import MarkdownDocument
 
-# 当前按 Python 字符数限制片段长度，不引入模型专用 tokenizer。
-DEFAULT_MAX_CHUNK_CHARACTERS = 1200
+# BGE 最多接收 512 token；500 字符为当前模型保留特殊 token 余量，
+# 同时继续让 Markdown 切分保持确定性，不把第三方 tokenizer 混入结构解析。
+DEFAULT_MAX_CHUNK_CHARACTERS = 500
 
 # 只识别 ATX 标题，即以 1 到 6 个 # 开始的标题；允许前置最多 3 个空格。
 _HEADING_PATTERN = re.compile(r"^[ \t]{0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$")

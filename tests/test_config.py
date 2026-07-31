@@ -22,14 +22,14 @@ def test_default_settings_load() -> None:
     assert settings.allowed_data_directories == (Path("knowledge"),)
     assert settings.markdown_max_file_size_bytes == 2 * 1024 * 1024
     assert settings.markdown_max_total_size_bytes == 20 * 1024 * 1024
-    assert settings.markdown_chunk_max_characters == 1200
+    assert settings.markdown_chunk_max_characters == 500
     assert settings.vector_store_path == Path("vector_index")
     assert settings.vector_collection_name == "interview_agent_chunks"
     assert settings.embedding_batch_size == 64
     assert settings.embedding_model_name == "BAAI/bge-small-zh-v1.5"
     assert settings.embedding_cache_directory == Path("embedding_models")
     assert settings.embedding_local_files_only is False
-    assert settings.search_notes_min_score == 0.45
+    assert settings.search_notes_min_score == 0.58
     assert settings.search_notes_max_total_characters == 6000
 
 
@@ -109,6 +109,9 @@ def test_rejects_non_positive_markdown_chunk_limit() -> None:
     # 字符上限和读取字节上限分别校验，避免混淆两种单位。
     with pytest.raises(ValidationError, match="must be greater than zero"):
         Settings(markdown_chunk_max_characters=0, _env_file=None)
+
+    with pytest.raises(ValidationError, match="must not exceed 500"):
+        Settings(markdown_chunk_max_characters=501, _env_file=None)
 
 
 def test_rejects_invalid_vector_settings() -> None:

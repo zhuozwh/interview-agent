@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from importlib.metadata import version
 from pathlib import Path
@@ -9,7 +10,16 @@ from typing import Any
 
 from fastembed import TextEmbedding
 
+from interview_agent.retrieval.embedding import EmbeddingInputError
+
 DEFAULT_FASTEMBED_MODEL = "BAAI/bge-small-zh-v1.5"
+MAX_FASTEMBED_INPUT_CHARACTERS = 500
+
+# BGE 官方建议短问题检索长文档时只给查询增加指令，文档片段保持原文。
+_BGE_ZH_QUERY_PREFIX = "为这个句子生成表示以用于检索相关文章："
+_DEFAULT_QUERY_PREFIXES = {
+    DEFAULT_FASTEMBED_MODEL: _BGE_ZH_QUERY_PREFIX,
+}
 
 
 class FastEmbedConfigurationError(ValueError):
@@ -26,6 +36,7 @@ class FastEmbedEmbeddingProvider:
         cache_directory: str | Path = "embedding_models",
         local_files_only: bool = False,
         threads: int | None = None,
+        query_prefix: str | None = None,
     ) -> None:
         normalized_model = model_name.strip()
         if not normalized_model or "\0" in normalized_model:
@@ -39,6 +50,10 @@ class FastEmbedEmbeddingProvider:
         ):
             raise FastEmbedConfigurationError(
                 "FastEmbed threads must be a positive integer or None"
+            )
+        if query_prefix is not None and not isinstance(query_prefix, str):
+            raise FastEmbedConfigurationError(
+                "FastEmbed query_prefix must be a string or None"
             )
 
         cache_path = Path(cache_directory).resolve()
@@ -59,12 +74,26 @@ class FastEmbedEmbeddingProvider:
         self.cache_directory = cache_path
         self.local_files_only = local_files_only
         self.threads = threads
+        self.query_prefix = (
+            _DEFAULT_QUERY_PREFIXES.get(normalized_model, "")
+            if query_prefix is None
+            else query_prefix
+        )
+        if "\0" in self.query_prefix:
+            raise FastEmbedConfigurationError(
+                "FastEmbed query_prefix must contain no NUL"
+            )
         self._dimension = dimension
         self._model: TextEmbedding | None = None
 
-        # 将适配器版本纳入身份；升级推理库后会触发一次明确的向量重建。
+        # 查询预处理和输入边界也属于检索配置；变化后触发明确重建，避免新旧行为混用。
+        query_prefix_fingerprint = hashlib.sha256(
+            self.query_prefix.encode("utf-8")
+        ).hexdigest()[:12]
         self._model_identity = (
             f"fastembed/{version('fastembed')}/{self.configured_model_name}"
+            f"/max-chars={MAX_FASTEMBED_INPUT_CHARACTERS}"
+            f"/query-prefix={query_prefix_fingerprint}"
         )
 
     @property
@@ -81,6 +110,8 @@ class FastEmbedEmbeddingProvider:
         """使用 passage 路径为待索引片段生成向量。"""
         if not texts:
             return []
+        for index, text in enumerate(texts):
+            _require_safe_input_length(text, label=f"text at index {index}")
         vectors = self._get_model().passage_embed(
             texts,
             batch_size=len(texts),
@@ -89,7 +120,9 @@ class FastEmbedEmbeddingProvider:
 
     def embed_query(self, query: str) -> list[float]:
         """使用 query 路径为检索问题生成一条向量。"""
-        vectors = self._get_model().query_embed(query)
+        prepared_query = f"{self.query_prefix}{query}"
+        _require_safe_input_length(prepared_query, label="query")
+        vectors = self._get_model().query_embed(prepared_query)
         try:
             vector = next(iter(vectors))
         except StopIteration as error:
@@ -126,3 +159,12 @@ def _to_float_list(vector: Any) -> list[float]:
     else:
         values = list(vector)
     return [float(value) for value in values]
+
+
+def _require_safe_input_length(text: str, *, label: str) -> None:
+    """在 FastEmbed 截断前拒绝超长输入，且不把私人正文写入异常。"""
+    if len(text) > MAX_FASTEMBED_INPUT_CHARACTERS:
+        raise EmbeddingInputError(
+            f"FastEmbed {label} exceeds "
+            f"{MAX_FASTEMBED_INPUT_CHARACTERS} characters"
+        )

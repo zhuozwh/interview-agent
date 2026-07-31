@@ -27,8 +27,9 @@ from interview_agent.tools.models import ToolTraceRecord, ToolTraceStore
 
 SEARCH_NOTES_TOOL_NAME = "search_notes"
 DEFAULT_TOP_K = 5
+DEFAULT_MIN_SCORE = 0.58
 MAX_TOP_K = 10
-MAX_QUERY_CHARACTERS = 500
+MAX_QUERY_CHARACTERS = 480
 MAX_TOTAL_CHARACTERS = 20_000
 NOTES_SOURCE_NAMESPACE = "notes"
 
@@ -105,7 +106,7 @@ class SearchNotesTool:
         vector_store: VectorStore,
         state_store: VectorIndexStateStore,
         trace_store: ToolTraceStore,
-        min_score: float = 0.45,
+        min_score: float = DEFAULT_MIN_SCORE,
         max_total_characters: int = 6000,
     ) -> None:
         if (

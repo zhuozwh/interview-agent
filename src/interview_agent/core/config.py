@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     markdown_max_file_size_bytes: int = 2 * 1024 * 1024
     markdown_max_total_size_bytes: int = 20 * 1024 * 1024
 
-    # Phase 1B 暂按字符数控制片段长度，不与具体 Embedding 模型的 tokenizer 绑定。
-    markdown_chunk_max_characters: int = 1200
+    # 500 字符为当前 512-token BGE 模型保留特殊 token 余量。
+    markdown_chunk_max_characters: int = 500
 
     # Chroma 只保存本地向量索引；模型身份和维度由实际 Embedding 适配器提供。
     vector_store_path: Path = Path("vector_index")
@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     embedding_local_files_only: bool = False
 
     # Tool 级阈值和正文预算用于拒绝弱证据，并限制返回给后续 LLM 的上下文。
-    search_notes_min_score: float = 0.45
+    search_notes_min_score: float = 0.58
     search_notes_max_total_characters: int = 6000
 
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
@@ -89,10 +89,14 @@ class Settings(BaseSettings):
     @field_validator("markdown_chunk_max_characters")
     @classmethod
     def require_positive_chunk_limit(cls, value: int) -> int:
-        """Markdown 片段长度上限必须是正整数。"""
+        """片段必须为正数，且不能越过当前 FastEmbed 的安全输入边界。"""
         if value <= 0:
             raise ValueError(
                 "MARKDOWN_CHUNK_MAX_CHARACTERS must be greater than zero"
+            )
+        if value > 500:
+            raise ValueError(
+                "MARKDOWN_CHUNK_MAX_CHARACTERS must not exceed 500"
             )
         return value
 
