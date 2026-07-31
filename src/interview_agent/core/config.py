@@ -1,9 +1,10 @@
 """集中定义和加载应用配置。"""
 
 from functools import lru_cache
+import math
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -54,6 +55,15 @@ class Settings(BaseSettings):
 
     # RAG 预算覆盖 JSON 包络、引用元数据和正文，独立于 Tool 的正文预算。
     rag_context_max_characters: int = 8000
+
+    # LLM 密钥可缺省，让健康检查和离线测试无需远程凭据即可启动。
+    llm_api_key: SecretStr | None = None
+    llm_base_url: str = "https://api.deepseek.com"
+    llm_model: str = "deepseek-v4-flash"
+    llm_timeout_seconds: float = 60.0
+    llm_max_retries: int = 2
+    llm_temperature: float = 0.2
+    llm_max_tokens: int = 1200
 
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
     @field_validator("log_level")
@@ -149,6 +159,73 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RAG_CONTEXT_MAX_CHARACTERS must be between 512 and 50000"
             )
+        return value
+
+    @field_validator("llm_api_key", mode="before")
+    @classmethod
+    def normalize_optional_llm_api_key(cls, value):
+        """空环境变量等同于未配置，真实值由 SecretStr 防止意外展示。"""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("llm_base_url", "llm_model")
+    @classmethod
+    def require_non_empty_llm_endpoint_and_model(cls, value: str) -> str:
+        """URL 和模型名不得为空或包含控制字符。"""
+        normalized = value.strip()
+        if (
+            not normalized
+            or len(normalized) > 2_048
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            raise ValueError("LLM base URL and model must be safe non-empty text")
+        return normalized
+
+    @field_validator(
+        "llm_timeout_seconds",
+        "llm_max_retries",
+        "llm_temperature",
+        "llm_max_tokens",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_llm_numbers(cls, value):
+        """Python 的 bool 属于 int 子类，但不能表示数值型 LLM 配置。"""
+        if isinstance(value, bool):
+            raise ValueError("LLM numeric settings must not be boolean")
+        return value
+
+    @field_validator("llm_timeout_seconds")
+    @classmethod
+    def require_valid_llm_timeout(cls, value: float) -> float:
+        """每次远程尝试必须有有限超时。"""
+        if not math.isfinite(value) or not 1.0 <= value <= 600.0:
+            raise ValueError("LLM_TIMEOUT_SECONDS must be between 1 and 600")
+        return value
+
+    @field_validator("llm_max_retries")
+    @classmethod
+    def require_valid_llm_retries(cls, value: int) -> int:
+        """限制自动重试，避免放大费用和远端故障。"""
+        if not 0 <= value <= 3:
+            raise ValueError("LLM_MAX_RETRIES must be between 0 and 3")
+        return value
+
+    @field_validator("llm_temperature")
+    @classmethod
+    def require_valid_llm_temperature(cls, value: float) -> float:
+        """温度遵循 Chat Completions 的有效范围。"""
+        if not math.isfinite(value) or not 0.0 <= value <= 2.0:
+            raise ValueError("LLM_TEMPERATURE must be between 0 and 2")
+        return value
+
+    @field_validator("llm_max_tokens")
+    @classmethod
+    def require_valid_llm_max_tokens(cls, value: int) -> int:
+        """输出 token 上限必须明确且受控。"""
+        if not 1 <= value <= 32_768:
+            raise ValueError("LLM_MAX_TOKENS must be between 1 and 32768")
         return value
 
 

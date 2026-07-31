@@ -32,6 +32,13 @@ def test_default_settings_load() -> None:
     assert settings.search_notes_min_score == 0.58
     assert settings.search_notes_max_total_characters == 6000
     assert settings.rag_context_max_characters == 8000
+    assert settings.llm_api_key is None
+    assert settings.llm_base_url == "https://api.deepseek.com"
+    assert settings.llm_model == "deepseek-v4-flash"
+    assert settings.llm_timeout_seconds == 60.0
+    assert settings.llm_max_retries == 2
+    assert settings.llm_temperature == 0.2
+    assert settings.llm_max_tokens == 1200
 
 
 def test_environment_variables_override_settings(monkeypatch) -> None:
@@ -59,6 +66,13 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("SEARCH_NOTES_MIN_SCORE", "0.5")
     monkeypatch.setenv("SEARCH_NOTES_MAX_TOTAL_CHARACTERS", "3000")
     monkeypatch.setenv("RAG_CONTEXT_MAX_CHARACTERS", "5000")
+    monkeypatch.setenv("LLM_API_KEY", "test-only-secret")
+    monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.com/v1")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "15")
+    monkeypatch.setenv("LLM_MAX_RETRIES", "1")
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.1")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "600")
 
     # get_settings 使用了缓存；读取新环境变量前必须清除旧配置对象。
     get_settings.cache_clear()
@@ -90,6 +104,14 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.search_notes_min_score == 0.5
     assert settings.search_notes_max_total_characters == 3000
     assert settings.rag_context_max_characters == 5000
+    assert settings.llm_api_key.get_secret_value() == "test-only-secret"
+    assert "test-only-secret" not in repr(settings)
+    assert settings.llm_base_url == "https://llm.example.com/v1"
+    assert settings.llm_model == "test-model"
+    assert settings.llm_timeout_seconds == 15.0
+    assert settings.llm_max_retries == 1
+    assert settings.llm_temperature == 0.1
+    assert settings.llm_max_tokens == 600
 
 
 def test_rejects_empty_allowed_data_directories() -> None:
@@ -148,3 +170,33 @@ def test_rejects_invalid_rag_context_budget() -> None:
 
     with pytest.raises(ValidationError, match="between 512 and 50000"):
         Settings(rag_context_max_characters=50_001, _env_file=None)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("llm_base_url", " ", "safe non-empty"),
+        ("llm_model", "bad\nmodel", "safe non-empty"),
+        ("llm_timeout_seconds", 0, "between 1 and 600"),
+        ("llm_timeout_seconds", float("inf"), "between 1 and 600"),
+        ("llm_max_retries", 4, "between 0 and 3"),
+        ("llm_temperature", 2.1, "between 0 and 2"),
+        ("llm_max_tokens", 0, "between 1 and 32768"),
+        ("llm_max_retries", True, "must not be boolean"),
+        ("llm_temperature", False, "must not be boolean"),
+    ],
+)
+def test_rejects_invalid_llm_settings(
+    field_name: str,
+    value,
+    message: str,
+) -> None:
+    """远程地址、超时、重试和费用相关边界在配置加载阶段失败。"""
+    with pytest.raises(ValidationError, match=message):
+        Settings(**{field_name: value}, _env_file=None)
+
+
+def test_blank_llm_api_key_is_treated_as_unconfigured() -> None:
+    """示例配置中的空密钥不能被误认为有效凭据。"""
+    settings = Settings(llm_api_key=" ", _env_file=None)
+    assert settings.llm_api_key is None

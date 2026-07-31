@@ -1,0 +1,53 @@
+"""公开与供应方无关的 LLM 协议和 OpenAI-compatible 实现。"""
+
+from interview_agent.llm.models import (
+    ChatMessage,
+    ChatRole,
+    LLMAuthenticationError,
+    LLMClient,
+    LLMConfigurationError,
+    LLMConnectionError,
+    LLMError,
+    LLMInputError,
+    LLMRateLimitError,
+    LLMRequestError,
+    LLMResponse,
+    LLMResponseError,
+    LLMServiceError,
+    LLMTimeoutError,
+    LLMUsage,
+)
+from interview_agent.llm.openai_compatible import (
+    DEFAULT_LLM_BASE_URL,
+    DEFAULT_LLM_MAX_RETRIES,
+    DEFAULT_LLM_MAX_TOKENS,
+    DEFAULT_LLM_MODEL,
+    DEFAULT_LLM_TEMPERATURE,
+    DEFAULT_LLM_TIMEOUT_SECONDS,
+    OpenAICompatibleLLMClient,
+)
+
+__all__ = [
+    "ChatMessage",
+    "ChatRole",
+    "DEFAULT_LLM_BASE_URL",
+    "DEFAULT_LLM_MAX_RETRIES",
+    "DEFAULT_LLM_MAX_TOKENS",
+    "DEFAULT_LLM_MODEL",
+    "DEFAULT_LLM_TEMPERATURE",
+    "DEFAULT_LLM_TIMEOUT_SECONDS",
+    "LLMAuthenticationError",
+    "LLMClient",
+    "LLMConfigurationError",
+    "LLMConnectionError",
+    "LLMError",
+    "LLMInputError",
+    "LLMRateLimitError",
+    "LLMRequestError",
+    "LLMResponse",
+    "LLMResponseError",
+    "LLMServiceError",
+    "LLMTimeoutError",
+    "LLMUsage",
+    "OpenAICompatibleLLMClient",
+]

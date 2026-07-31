@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前版本为 **v0.2.5**，已完成 **Phase 1F：RAG 上下文与引用组装**。
+当前版本为 **v0.2.6**，已完成 **Phase 1G：OpenAI-compatible LLM 适配层**。
 
 已实现：
 
@@ -37,11 +37,13 @@
 - SQLite Tool 调用追踪，不保存问题或笔记正文；
 - 可显式启用的真实模型固定正例与硬负例验收；
 - 检索证据的稳定去重、引用编号、完整上下文预算和防注入 JSON 包装；
+- OpenAI-compatible 非流式 LLM 客户端、有限安全重试和严格响应校验；
+- LLM 超时、认证、限流、请求、连接、服务和响应错误分类；
+- token 用量、缓存命中和推理 token 明细；
 - pytest 基础测试。
 
 尚未实现：
 
-- DeepSeek 或其他 LLM API；
 - Front Matter 字段值的语义解析；
 - 其他两个初始 Tool、Agent Router、LLM Tool Calling 和面试问答；
 - Web 前端。
@@ -93,6 +95,13 @@ EMBEDDING_LOCAL_FILES_ONLY=false
 SEARCH_NOTES_MIN_SCORE=0.58
 SEARCH_NOTES_MAX_TOTAL_CHARACTERS=6000
 RAG_CONTEXT_MAX_CHARACTERS=8000
+LLM_API_KEY=
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+LLM_TIMEOUT_SECONDS=60
+LLM_MAX_RETRIES=2
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=1200
 ```
 
 Phase 1D 对 Chroma 和 FAISS 做了同机最小验证。两者都能在当前 Windows/Python 环境中完成向量查询、删除和重启恢复；最终只采用 Chroma，因为它原生保存正文与引用元数据、支持元数据过滤和按 ID 更新，避免再为 FAISS 维护一套 ID 映射、元数据侧车和过滤逻辑。
@@ -191,6 +200,53 @@ with ChromaVectorStore(
 `build_search_notes_context` 把 Tool 响应转换为后续回答生成使用的 `RagContext`。它按检索排名稳定排序，折叠完全相同的重复片段，为实际进入上下文的证据分配 `[S1]`、`[S2]` 等引用标识，并保留相对路径、标题层级、原文行号、指纹和追踪身份。`RAG_CONTEXT_MAX_CHARACTERS` 限制的是包括 JSON 包络、引用元数据和正文在内的完整上下文；空间不足时只截断最低优先级片段并显式标记。
 
 证据使用紧凑 JSON 表达，Markdown 正文始终作为转义后的字符串值存在。上下文携带“不可信只读资料”策略，文档中的伪造 JSON、提示词或工具指令不能改变引用结构；真正的权限、工具白名单和写入边界仍由确定性代码控制。`no_results` 与 Tool 故障会转换为不同的上下文状态，后续 Agent 不会把系统错误误当成“知识库没有答案”。
+
+Phase 1G 使用 `httpx` 直接调用 OpenAI-compatible `POST /chat/completions`，不依赖供应方 SDK。默认 `LLM_BASE_URL=https://api.deepseek.com`，默认模型为 `deepseek-v4-flash`；[DeepSeek 官方更新记录](https://api-docs.deepseek.com/updates)说明旧的 `deepseek-chat` 和 `deepseek-reasoner` 名称已在 2026-07-24 停用，模型变化应通过配置处理，而不是写入业务逻辑。请求和响应字段以[官方 Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion)为准。当前只实现非流式文本补全，不启用供应方 Tool Calling。
+
+`OpenAICompatibleLLMClient` 对消息数量、单条和总字符数、输出 token、超时和重试次数设置本地上限。只对连接尚未建立、HTTP 429、502、503 和 504 自动进行有限重试；读取或写入超时可能发生在供应方已经接受并计费之后，因此不会自动重复 POST。认证、限流、无效请求、服务故障和响应结构错误会转换为稳定异常，异常不包含密钥、提示词或供应方错误正文。HTTP 只允许用于 loopback 本地兼容服务，远程地址必须使用 HTTPS。
+
+客户端要求非流式响应只包含一个 `index=0` 的 assistant choice，并校验停止原因、正文、模型、请求 ID 和 token 用量。供应方返回的思维过程不会进入 `LLMResponse`，后续 Agent 只使用最终回答正文。
+
+最小调用方式如下；应用层后续会负责提示词和 RAG 消息组装，适配器本身不读取知识库：
+
+```python
+from interview_agent.core.config import get_settings
+from interview_agent.llm import (
+    ChatMessage,
+    ChatRole,
+    OpenAICompatibleLLMClient,
+)
+
+settings = get_settings()
+if settings.llm_api_key is None:
+    raise RuntimeError("LLM_API_KEY is not configured")
+
+with OpenAICompatibleLLMClient(
+    api_key=settings.llm_api_key.get_secret_value(),
+    base_url=settings.llm_base_url,
+    model=settings.llm_model,
+    timeout_seconds=settings.llm_timeout_seconds,
+    max_retries=settings.llm_max_retries,
+    temperature=settings.llm_temperature,
+    max_tokens=settings.llm_max_tokens,
+) as client:
+    response = client.complete(
+        (
+            ChatMessage(role=ChatRole.SYSTEM, content="只回答技术问题。"),
+            ChatMessage(role=ChatRole.USER, content="什么是 RAII？"),
+        )
+    )
+```
+
+日常测试通过 `httpx.MockTransport` 覆盖协议和错误路径，不访问网络。只有用户明确接受一次远程调用及其费用，并已经配置测试密钥时，才运行脱敏真实验收：
+
+```powershell
+$env:RUN_REAL_LLM_ACCEPTANCE="1"
+$env:LLM_API_KEY="<仅在当前终端设置的测试密钥>"
+.\.venv\Scripts\python -m pytest tests\test_real_llm_acceptance.py
+```
+
+真实验收只发送公开的 RAII 基础问题，不读取或发送 Vault、简历、文件路径和本机运行数据。
 
 SQLite 只保存数据源命名空间、相对路径、指纹、标题路径、行号和向量配置，不保存 Markdown 正文及本机绝对路径。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
 
