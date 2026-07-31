@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前版本为 **v0.2.4.1**，已完成 **Phase 1E 收口：本地语义检索可靠性基线**。
+当前版本为 **v0.2.5**，已完成 **Phase 1F：RAG 上下文与引用组装**。
 
 已实现：
 
@@ -36,13 +36,13 @@
 - 弱证据过滤、Top-K、查询长度和返回正文总预算；
 - SQLite Tool 调用追踪，不保存问题或笔记正文；
 - 可显式启用的真实模型固定正例与硬负例验收；
+- 检索证据的稳定去重、引用编号、完整上下文预算和防注入 JSON 包装；
 - pytest 基础测试。
 
 尚未实现：
 
 - DeepSeek 或其他 LLM API；
 - Front Matter 字段值的语义解析；
-- 面向回答生成的完整 RAG 上下文组装；
 - 其他两个初始 Tool、Agent Router、LLM Tool Calling 和面试问答；
 - Web 前端。
 
@@ -92,6 +92,7 @@ EMBEDDING_CACHE_DIRECTORY=embedding_models
 EMBEDDING_LOCAL_FILES_ONLY=false
 SEARCH_NOTES_MIN_SCORE=0.58
 SEARCH_NOTES_MAX_TOTAL_CHARACTERS=6000
+RAG_CONTEXT_MAX_CHARACTERS=8000
 ```
 
 Phase 1D 对 Chroma 和 FAISS 做了同机最小验证。两者都能在当前 Windows/Python 环境中完成向量查询、删除和重启恢复；最终只采用 Chroma，因为它原生保存正文与引用元数据、支持元数据过滤和按 ID 更新，避免再为 FAISS 维护一套 ID 映射、元数据侧车和过滤逻辑。
@@ -102,6 +103,7 @@ Phase 1E 使用 FastEmbed 在本机运行 `BAAI/bge-small-zh-v1.5`。首次实�
 
 ```python
 from interview_agent.core.config import get_settings
+from interview_agent.rag import build_search_notes_context
 from interview_agent.retrieval import (
     build_index_plan,
     FastEmbedEmbeddingProvider,
@@ -168,6 +170,10 @@ with ChromaVectorStore(
             top_k=5,
         )
     )
+    context = build_search_notes_context(
+        response,
+        max_characters=settings.rag_context_max_characters,
+    )
 ```
 
 每篇文档包含绝对规范化的 `source_path`、相对数据源的 `relative_path` 和 UTF-8 `content`。Front Matter 会从检索正文中分离并原样保留；正文片段仍使用原文件中从 1 开始的真实行号。切分只识别代码围栏外的 `#` 到 `######` ATX 标题；短内容优先保持段落完整，超长内容才按行和字符继续切分。当前默认片段上限为 500 字符，为模型的 512-token 上限保留特殊 token 余量；配置超过 500 会在启动时失败，直接调用 FastEmbed 适配器传入超长文本也会得到明确错误。
@@ -181,6 +187,10 @@ with ChromaVectorStore(
 `search_notes` 是 Agent 后续会调用的稳定 Tool 边界。它固定检索 `notes` 命名空间，不接受任意文件路径；问题最长 480 字符，连同查询指令后仍处于模型安全输入范围。`top_k` 限制为 1 到 10，并按 `SEARCH_NOTES_MIN_SCORE` 拒绝弱证据。返回正文还受总字符预算限制，截断时会显式设置 `content_truncated`。无合格证据会返回 `no_results`，不会把向量数据库强制返回的最近片段伪装成可靠依据。
 
 每次 `search_notes` 调用生成 `trace_id` 和 `tool_call_id`。SQLite 只记录工具名、参数长度摘要、耗时、状态、错误类别和实际返回的片段 ID，不保存问题正文、笔记正文或绝对路径。索引未就绪、Embedding 超时、存储失败和无结果都有稳定状态。
+
+`build_search_notes_context` 把 Tool 响应转换为后续回答生成使用的 `RagContext`。它按检索排名稳定排序，折叠完全相同的重复片段，为实际进入上下文的证据分配 `[S1]`、`[S2]` 等引用标识，并保留相对路径、标题层级、原文行号、指纹和追踪身份。`RAG_CONTEXT_MAX_CHARACTERS` 限制的是包括 JSON 包络、引用元数据和正文在内的完整上下文；空间不足时只截断最低优先级片段并显式标记。
+
+证据使用紧凑 JSON 表达，Markdown 正文始终作为转义后的字符串值存在。上下文携带“不可信只读资料”策略，文档中的伪造 JSON、提示词或工具指令不能改变引用结构；真正的权限、工具白名单和写入边界仍由确定性代码控制。`no_results` 与 Tool 故障会转换为不同的上下文状态，后续 Agent 不会把系统错误误当成“知识库没有答案”。
 
 SQLite 只保存数据源命名空间、相对路径、指纹、标题路径、行号和向量配置，不保存 Markdown 正文及本机绝对路径。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
 

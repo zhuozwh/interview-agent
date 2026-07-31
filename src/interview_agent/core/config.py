@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     search_notes_min_score: float = 0.58
     search_notes_max_total_characters: int = 6000
 
+    # RAG 预算覆盖 JSON 包络、引用元数据和正文，独立于 Tool 的正文预算。
+    rag_context_max_characters: int = 8000
+
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
     @field_validator("log_level")
     @classmethod
@@ -135,6 +138,16 @@ class Settings(BaseSettings):
         if not 1 <= value <= 20_000:
             raise ValueError(
                 "SEARCH_NOTES_MAX_TOTAL_CHARACTERS must be between 1 and 20000"
+            )
+        return value
+
+    @field_validator("rag_context_max_characters")
+    @classmethod
+    def require_valid_rag_context_budget(cls, value: int) -> int:
+        """完整 RAG 上下文预算需容纳包络，同时禁止无界增长。"""
+        if not 512 <= value <= 50_000:
+            raise ValueError(
+                "RAG_CONTEXT_MAX_CHARACTERS must be between 512 and 50000"
             )
         return value
 

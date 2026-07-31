@@ -31,6 +31,7 @@ def test_default_settings_load() -> None:
     assert settings.embedding_local_files_only is False
     assert settings.search_notes_min_score == 0.58
     assert settings.search_notes_max_total_characters == 6000
+    assert settings.rag_context_max_characters == 8000
 
 
 def test_environment_variables_override_settings(monkeypatch) -> None:
@@ -57,6 +58,7 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("EMBEDDING_LOCAL_FILES_ONLY", "true")
     monkeypatch.setenv("SEARCH_NOTES_MIN_SCORE", "0.5")
     monkeypatch.setenv("SEARCH_NOTES_MAX_TOTAL_CHARACTERS", "3000")
+    monkeypatch.setenv("RAG_CONTEXT_MAX_CHARACTERS", "5000")
 
     # get_settings 使用了缓存；读取新环境变量前必须清除旧配置对象。
     get_settings.cache_clear()
@@ -87,6 +89,7 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.embedding_local_files_only is True
     assert settings.search_notes_min_score == 0.5
     assert settings.search_notes_max_total_characters == 3000
+    assert settings.rag_context_max_characters == 5000
 
 
 def test_rejects_empty_allowed_data_directories() -> None:
@@ -136,3 +139,12 @@ def test_rejects_invalid_search_notes_settings() -> None:
 
     with pytest.raises(ValidationError, match="between 1 and 20000"):
         Settings(search_notes_max_total_characters=20_001, _env_file=None)
+
+
+def test_rejects_invalid_rag_context_budget() -> None:
+    """上下文预算必须能放入最小包络，同时保持本地请求有明确上限。"""
+    with pytest.raises(ValidationError, match="between 512 and 50000"):
+        Settings(rag_context_max_characters=511, _env_file=None)
+
+    with pytest.raises(ValidationError, match="between 512 and 50000"):
+        Settings(rag_context_max_characters=50_001, _env_file=None)

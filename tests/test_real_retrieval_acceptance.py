@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 
 import pytest
 
+from interview_agent.rag import RagContextStatus, build_search_notes_context
 from interview_agent.retrieval import (
     FastEmbedEmbeddingProvider,
     build_index_plan,
@@ -127,6 +128,12 @@ def test_real_embedding_accepts_known_topics_and_rejects_hard_negatives(
             assert expected_path in {
                 result.relative_path for result in response.results
             }
+            context = build_search_notes_context(response)
+            assert context.status is RagContextStatus.READY
+            assert expected_path in {
+                citation.relative_path for citation in context.citations
+            }
+            assert len(context.rendered_context) <= 8_000
 
         negative_queries = (
             "SwiftUI 中 @StateObject 的生命周期是什么？",
@@ -142,3 +149,6 @@ def test_real_embedding_accepts_known_topics_and_rejects_hard_negatives(
             )
             assert response.status is SearchNotesStatus.NO_RESULTS
             assert response.results == ()
+            context = build_search_notes_context(response)
+            assert context.status is RagContextStatus.NO_EVIDENCE
+            assert context.citations == ()
