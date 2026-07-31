@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前版本为 **v0.2.6**，已完成 **Phase 1G：OpenAI-compatible LLM 适配层**。
+当前版本为 **v0.2.7**，已完成 **Phase 1H：单 Tool Agent 最小闭环**。
 
 已实现：
 
@@ -40,12 +40,15 @@
 - OpenAI-compatible 非流式 LLM 客户端、有限安全重试和严格响应校验；
 - LLM 超时、认证、限流、请求、连接、服务和响应错误分类；
 - token 用量、缓存命中和推理 token 明细；
+- 面向知识问答的确定性 Router、一次 Tool 调用和明确停止条件；
+- 问题、检索证据、LLM 回答和引用共享的请求追踪标识；
+- 模型引用白名单、完成状态、链接和绝对路径的输出校验；
 - pytest 基础测试。
 
 尚未实现：
 
 - Front Matter 字段值的语义解析；
-- 其他两个初始 Tool、Agent Router、LLM Tool Calling 和面试问答；
+- 其他两个初始 Tool、完整问答应用用例和 FastAPI 问答接口；
 - Web 前端。
 
 ## 快速开始
@@ -102,6 +105,8 @@ LLM_TIMEOUT_SECONDS=60
 LLM_MAX_RETRIES=2
 LLM_TEMPERATURE=0.2
 LLM_MAX_TOKENS=1200
+AGENT_TOP_K=5
+AGENT_MAX_ANSWER_CHARACTERS=8000
 ```
 
 Phase 1D 对 Chroma 和 FAISS 做了同机最小验证。两者都能在当前 Windows/Python 环境中完成向量查询、删除和重启恢复；最终只采用 Chroma，因为它原生保存正文与引用元数据、支持元数据过滤和按 ID 更新，避免再为 FAISS 维护一套 ID 映射、元数据侧车和过滤逻辑。
@@ -247,6 +252,20 @@ $env:LLM_API_KEY="<仅在当前终端设置的测试密钥>"
 ```
 
 真实验收只发送公开的 RAII 基础问题，不读取或发送 Vault、简历、文件路径和本机运行数据。
+
+Phase 1H 的 `KnowledgeAgent` 建立了第一个真实 Agent 控制循环：
+
+1. 校验问题并生成或接受规范 UUID `trace_id`；
+2. 确定性 Router 识别知识问答、项目、简历和面试复盘意图；
+3. 知识问答只调用一次 `search_notes`，不允许模型发明工具或参数；
+4. 无证据、Tool 故障和不支持意图立即停止，不调用 LLM 猜测；
+5. 有证据时构建防注入 RAG JSON，再调用一次 LLM；
+6. 只接受正常完成、长度受控且引用全部来自本次检索的回答；
+7. 返回回答、实际使用的引用、Tool 调用 ID、LLM 请求 ID 和共同追踪 ID。
+
+当前 Router 对项目、简历和复盘意图采用保守拒绝，因为对应 Tool 尚未在 Phase 1H 实现。模型输出中的 `[S1]` 引用由代码映射回实际 `Citation`；未知、损坏或伪装成链接的引用会使整条回答失败。外部 URL、Markdown 链接和 Windows 绝对路径也不会直接进入最终回答，应用层后续只根据已验证引用生成来源展示。
+
+提示词集中在 `agent/prompts.py` 并带版本号。问题和证据都作为 JSON 数据放在固定系统规则之后；即使文档包含提示注入文本，也不能改变代码控制的工具白名单、调用次数和停止条件。LLM 仍可能生成质量不佳但引用格式合法的文本，这是当前已知边界；回答效果评测和必要的排序优化属于 Phase 2。
 
 SQLite 只保存数据源命名空间、相对路径、指纹、标题路径、行号和向量配置，不保存 Markdown 正文及本机绝对路径。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
 

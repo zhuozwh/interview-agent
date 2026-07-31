@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1200
 
+    # 单 Agent 的调用次数由代码固定为一次；这里只配置检索数量和回答长度。
+    agent_top_k: int = 5
+    agent_max_answer_characters: int = 8000
+
     # 赋值完成后统一把日志级别转换为大写，并拒绝 logging 不支持的值。
     @field_validator("log_level")
     @classmethod
@@ -187,13 +191,15 @@ class Settings(BaseSettings):
         "llm_max_retries",
         "llm_temperature",
         "llm_max_tokens",
+        "agent_top_k",
+        "agent_max_answer_characters",
         mode="before",
     )
     @classmethod
     def reject_boolean_llm_numbers(cls, value):
-        """Python 的 bool 属于 int 子类，但不能表示数值型 LLM 配置。"""
+        """Python 的 bool 属于 int 子类，但不能表示数值型生成配置。"""
         if isinstance(value, bool):
-            raise ValueError("LLM numeric settings must not be boolean")
+            raise ValueError("Numeric generation settings must not be boolean")
         return value
 
     @field_validator("llm_timeout_seconds")
@@ -226,6 +232,24 @@ class Settings(BaseSettings):
         """输出 token 上限必须明确且受控。"""
         if not 1 <= value <= 32_768:
             raise ValueError("LLM_MAX_TOKENS must be between 1 and 32768")
+        return value
+
+    @field_validator("agent_top_k")
+    @classmethod
+    def require_valid_agent_top_k(cls, value: int) -> int:
+        """Agent 不能绕过 search_notes 的 Top-K 上限。"""
+        if not 1 <= value <= 10:
+            raise ValueError("AGENT_TOP_K must be between 1 and 10")
+        return value
+
+    @field_validator("agent_max_answer_characters")
+    @classmethod
+    def require_valid_agent_answer_budget(cls, value: int) -> int:
+        """模型回答进入应用响应前还有独立字符边界。"""
+        if not 1 <= value <= 20_000:
+            raise ValueError(
+                "AGENT_MAX_ANSWER_CHARACTERS must be between 1 and 20000"
+            )
         return value
 
 

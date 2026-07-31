@@ -39,6 +39,8 @@ def test_default_settings_load() -> None:
     assert settings.llm_max_retries == 2
     assert settings.llm_temperature == 0.2
     assert settings.llm_max_tokens == 1200
+    assert settings.agent_top_k == 5
+    assert settings.agent_max_answer_characters == 8000
 
 
 def test_environment_variables_override_settings(monkeypatch) -> None:
@@ -73,6 +75,8 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("LLM_MAX_RETRIES", "1")
     monkeypatch.setenv("LLM_TEMPERATURE", "0.1")
     monkeypatch.setenv("LLM_MAX_TOKENS", "600")
+    monkeypatch.setenv("AGENT_TOP_K", "3")
+    monkeypatch.setenv("AGENT_MAX_ANSWER_CHARACTERS", "4000")
 
     # get_settings 使用了缓存；读取新环境变量前必须清除旧配置对象。
     get_settings.cache_clear()
@@ -112,6 +116,8 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.llm_max_retries == 1
     assert settings.llm_temperature == 0.1
     assert settings.llm_max_tokens == 600
+    assert settings.agent_top_k == 3
+    assert settings.agent_max_answer_characters == 4000
 
 
 def test_rejects_empty_allowed_data_directories() -> None:
@@ -200,3 +206,23 @@ def test_blank_llm_api_key_is_treated_as_unconfigured() -> None:
     """示例配置中的空密钥不能被误认为有效凭据。"""
     settings = Settings(llm_api_key=" ", _env_file=None)
     assert settings.llm_api_key is None
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("agent_top_k", 0, "between 1 and 10"),
+        ("agent_top_k", 11, "between 1 and 10"),
+        ("agent_max_answer_characters", 0, "between 1 and 20000"),
+        ("agent_max_answer_characters", 20_001, "between 1 and 20000"),
+        ("agent_top_k", True, "must not be boolean"),
+    ],
+)
+def test_rejects_invalid_agent_settings(
+    field_name: str,
+    value: int,
+    message: str,
+) -> None:
+    """Agent 调用和输出预算不能越过下游稳定边界。"""
+    with pytest.raises(ValidationError, match=message):
+        Settings(**{field_name: value}, _env_file=None)
