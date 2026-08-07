@@ -26,6 +26,9 @@ embedding_models/
 *.index
 logs/
 
+# 真实 Vault 验收的本地问题集和明细报告，可能包含私人资料映射
+acceptance_local/
+
 # IDE 和操作系统自动生成的文件
 .idea/
 .vscode/
