@@ -8,6 +8,8 @@
 
 当前版本为 **v0.3.0**，**Phase 1：可用的知识问答 MVP 已完成**。
 
+v0.3.x 当前只进行真实 Vault 只读验收与 Phase 2 基线准备。检索、切分、排序或复杂 Router 增强从 v0.4.0 开始；在此之前不提前实现 Phase 2 功能。
+
 已实现：
 
 - Python 模块化单体工程骨架；
@@ -88,6 +90,8 @@ python -m venv .venv
 应用默认监听 `http://127.0.0.1:8000`，健康检查地址为 `http://127.0.0.1:8000/health`，问答接口和可视化调试文档分别为 `POST /ask` 与 `GET /docs`。
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
+
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。当前 notes/projects 双源预基线及已知失败见 [v0.3.1 预基线](docs/acceptance/V0.3.1_PREBASELINE.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
