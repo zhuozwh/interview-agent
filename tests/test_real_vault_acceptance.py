@@ -106,6 +106,7 @@ def test_real_vault_acceptance_runs_three_sources_without_sensitive_report(
         "resume.md",
         "candidate@example.com",
         "13812345678",
+        "file:///E:/private/resume/candidate.docx",
         str(temporary_directory / "vault"),
     ):
         assert forbidden not in serialized
@@ -306,7 +307,8 @@ def _build_complete_fixture(
     )
     (resume / "resume.md").write_text(
         "# 后端经历\n实习期间实现服务模块。\n"
-        "邮箱 candidate@example.com\n手机 13812345678",
+        "邮箱 candidate@example.com\n手机 13812345678\n"
+        "原件 file:///E:/private/resume/candidate.docx",
         encoding="utf-8",
     )
     runtime = root / "runtime"

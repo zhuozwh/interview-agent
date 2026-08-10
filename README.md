@@ -6,7 +6,7 @@
 
 ## 当前阶段
 
-当前版本为 **v0.3.0**，**Phase 1：可用的知识问答 MVP 已完成**。
+当前版本为 **v0.3.1**，**Phase 1：可用的知识问答 MVP 已完成**。
 
 v0.3.x 当前只进行真实 Vault 只读验收与 Phase 2 基线准备。检索、切分、排序或复杂 Router 增强从 v0.4.0 开始；在此之前不提前实现 Phase 2 功能。
 
@@ -91,7 +91,7 @@ python -m venv .venv
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。当前 notes/projects 双源预基线及已知失败见 [v0.3.1 预基线](docs/acceptance/V0.3.1_PREBASELINE.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 已完成 notes/projects/resume 三源正式基线，实际指标、已知失败和 Phase 2 触发项见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，此前双源结果保留在 [v0.3.1 预基线](docs/acceptance/V0.3.1_PREBASELINE.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -319,7 +319,7 @@ Phase 1J 已把 Router 接到三个只读 Tool：知识、项目和简历问题�
 Phase 1I 增加两个与 `search_notes` 同级的只读 Tool：
 
 - `get_project_context` 固定检索 `projects` 命名空间，只面向已经纳入数据源的项目说明、设计和实现状态；它不读取源码或 Git 历史，也不会根据文档空白推断功能已实现。
-- `get_resume_context` 固定检索 `resume` 命名空间，默认正文预算为 3000 字符；返回前会脱敏常见邮箱、中国大陆手机号、身份证号和微信/WeChat 账号，避免把联系方式发送给后续 LLM。
+- `get_resume_context` 固定检索 `resume` 命名空间，默认正文预算为 3000 字符；返回前会脱敏常见邮箱、中国大陆手机号、身份证号、微信/WeChat 账号、本机绝对路径和 `file://` URI，避免把个人标识或本机用户名发送给后续 LLM。
 
 三类数据源分别通过 `MARKDOWN_SOURCE_DIRECTORY`、`PROJECT_SOURCE_DIRECTORY` 和 `RESUME_SOURCE_DIRECTORY` 配置，但每个目录及其文件仍必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。索引时为三类文档分别传入 `notes`、`projects`、`resume` namespace，并将它们合并为同一次增量计划；Chroma 查询由 Tool 内部固定 namespace 过滤，调用方不能指定任意目录或跨资料类型检索。
 

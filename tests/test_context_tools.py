@@ -213,6 +213,8 @@ def test_resume_tool_redacts_formatted_contacts_and_identity_number(
         "+86 139-1234-5678",
         "11010519491231002X",
         "private_wechat_123",
+        "file:///E:/private/resume/candidate.docx",
+        "/home/candidate/private/resume.md",
     )
     (resume / "resume.md").write_text(
         "# 后端经历\n"
@@ -220,7 +222,9 @@ def test_resume_tool_redacts_formatted_contacts_and_identity_number(
         f"邮箱：{sensitive_values[0]}\n"
         f"手机：{sensitive_values[1]}\n"
         f"身份证：{sensitive_values[2]}\n"
-        f"WeChat: {sensitive_values[3]}",
+        f"WeChat: {sensitive_values[3]}\n"
+        f"原件：{sensitive_values[4]}\n"
+        f"快照：{sensitive_values[5]}",
         encoding="utf-8",
     )
     state_store, trace_store = _create_stores(temporary_directory)
@@ -252,6 +256,7 @@ def test_resume_tool_redacts_formatted_contacts_and_identity_number(
     assert "[REDACTED_PHONE]" in content
     assert "[REDACTED_ID]" in content
     assert "[REDACTED_ACCOUNT]" in content
+    assert "[REDACTED_LOCAL_PATH]" in content
     assert "2024" in content
     assert all(
         value not in str(trace_store.load_records(_TRACE_ID))
