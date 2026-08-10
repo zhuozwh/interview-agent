@@ -124,6 +124,76 @@ def test_runtime_enforces_total_bytes_across_all_sources(
         )
 
 
+@pytest.mark.parametrize(
+    ("field_name", "target_source", "target_name"),
+    [
+        ("database_path", "notes", "runtime.sqlite3"),
+        ("vector_store_path", "projects", "vectors"),
+        ("embedding_cache_directory", "resume", "models"),
+    ],
+)
+def test_runtime_rejects_writable_storage_inside_read_only_sources(
+    temporary_directory: Path,
+    field_name: str,
+    target_source: str,
+    target_name: str,
+) -> None:
+    """配置失误不能让 SQLite、Chroma 或模型缓存写进 Markdown 数据源。"""
+    allowed = temporary_directory / "knowledge"
+    notes, projects, resume = _create_sources(allowed)
+    sources = {
+        "notes": notes,
+        "projects": projects,
+        "resume": resume,
+    }
+    target_path = sources[target_source] / target_name
+    settings_values = {
+        "markdown_source_directory": notes,
+        "project_source_directory": projects,
+        "resume_source_directory": resume,
+        "allowed_data_directories": (allowed,),
+        "database_path": temporary_directory / "runtime.sqlite3",
+        "vector_store_path": temporary_directory / "vectors",
+        "embedding_cache_directory": temporary_directory / "models",
+        "llm_api_key": "test-only-key",
+        field_name: target_path,
+        "_env_file": None,
+    }
+
+    with pytest.raises(ApplicationUnavailableError, match="must stay outside"):
+        build_local_runtime(Settings(**settings_values))
+
+    assert not target_path.exists()
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["vector_store_path", "embedding_cache_directory"],
+)
+def test_runtime_rejects_writable_directory_that_contains_sources(
+    temporary_directory: Path,
+    field_name: str,
+) -> None:
+    """目录型运行时根不能反向包住数据源，避免清理运行时时误删原文。"""
+    allowed = temporary_directory / "knowledge"
+    notes, projects, resume = _create_sources(allowed)
+    settings_values = {
+        "markdown_source_directory": notes,
+        "project_source_directory": projects,
+        "resume_source_directory": resume,
+        "allowed_data_directories": (allowed,),
+        "database_path": temporary_directory / "runtime.sqlite3",
+        "vector_store_path": temporary_directory / "vectors",
+        "embedding_cache_directory": temporary_directory / "models",
+        "llm_api_key": "test-only-key",
+        field_name: allowed,
+        "_env_file": None,
+    }
+
+    with pytest.raises(ApplicationUnavailableError, match="must stay outside"):
+        build_local_runtime(Settings(**settings_values))
+
+
 def test_runtime_close_releases_llm_even_if_vector_close_fails() -> None:
     """一个资源关闭异常不能阻止另一个外部连接池释放。"""
 

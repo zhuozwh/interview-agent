@@ -160,6 +160,7 @@ def build_local_runtime(settings: Settings) -> LocalInterviewRuntime:
             settings.resume_source_directory,
         )
     )
+    _require_runtime_paths_outside_sources(settings, source_paths)
     database = SQLiteDatabase(settings.database_path)
     state_store = SQLiteIndexStateStore(database)
     tool_trace_store = SQLiteToolTraceStore(database)
@@ -283,6 +284,39 @@ def _require_disjoint_source_directories(
                     "Configured source directories must not overlap."
                 )
     return resolved[0], resolved[1], resolved[2]
+
+
+def _require_runtime_paths_outside_sources(
+    settings: Settings,
+    source_directories: tuple[Path, Path, Path],
+) -> None:
+    """在创建任何运行时文件前拒绝与只读数据源重叠的写入路径。"""
+    runtime_paths = (
+        ("DATABASE_PATH", settings.database_path, False),
+        ("VECTOR_STORE_PATH", settings.vector_store_path, True),
+        ("EMBEDDING_CACHE_DIRECTORY", settings.embedding_cache_directory, True),
+    )
+    for label, configured_path, is_directory in runtime_paths:
+        try:
+            runtime_path = configured_path.expanduser().resolve(strict=False)
+        except (OSError, RuntimeError) as error:
+            raise ApplicationUnavailableError(
+                f"{label} cannot be resolved safely."
+            ) from error
+
+        for source_path in source_directories:
+            # 运行时文件不能写进数据源；目录型运行时根也不能反向包含数据源，
+            # 否则后续重建或人工清理运行时目录时可能误伤原始 Markdown。
+            overlaps = (
+                runtime_path == source_path
+                or source_path in runtime_path.parents
+                or (is_directory and runtime_path in source_path.parents)
+            )
+            if overlaps:
+                raise ApplicationUnavailableError(
+                    "Runtime storage paths must stay outside configured "
+                    "source directories."
+                )
 
 
 def _load_index_documents(

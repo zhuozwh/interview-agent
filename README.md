@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前版本为 **v0.3.1**，**Phase 1：可用的知识问答 MVP 已完成**。
+当前版本为 **v0.3.2**，**Phase 1：可用的知识问答 MVP 已完成，v0.3.x 安全收口已完成**。
 
-v0.3.x 当前只进行真实 Vault 只读验收与 Phase 2 基线准备。检索、切分、排序或复杂 Router 增强从 v0.4.0 开始；在此之前不提前实现 Phase 2 功能。
+v0.3.x 已完成真实 Vault 只读验收、Phase 2 基线准备和运行时写入边界加固。检索、切分、排序或复杂 Router 增强从 v0.4.0 开始；v0.3.2 没有提前实现 Phase 2 功能。
 
 已实现：
 
@@ -91,7 +91,7 @@ python -m venv .venv
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 已完成 notes/projects/resume 三源正式基线，实际指标、已知失败和 Phase 2 触发项见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，此前双源结果保留在 [v0.3.1 预基线](docs/acceptance/V0.3.1_PREBASELINE.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 已完成 notes/projects/resume 三源正式基线，实际指标、已知失败和 Phase 2 触发项见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，此前双源结果保留在 [v0.3.1 预基线](docs/acceptance/V0.3.1_PREBASELINE.md)。v0.3.2 的安全审查、修复、接受风险和发布证据见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -104,7 +104,7 @@ RESUME_SOURCE_DIRECTORY=D:/Obsidian/面试/简历
 ALLOWED_DATA_DIRECTORIES=["D:/Obsidian/面试"]
 ```
 
-应用始终只读这些 Markdown；SQLite、Chroma 和模型缓存仍应配置到项目的本地运行目录，并由 `.gitignore` 排除。
+应用始终只读这些 Markdown；SQLite、Chroma 和模型缓存仍应配置到项目的本地运行目录，并由 `.gitignore` 排除。正常应用启动会在创建任何运行时文件前拒绝这些写入路径位于数据源内部，也会拒绝目录型运行时根反向包含数据源。
 
 PowerShell 调试示例：
 
@@ -351,7 +351,7 @@ $env:EMBEDDING_CACHE_DIRECTORY="embedding_models"
 
 ## Phase 1 验收与已知边界
 
-v0.3.0 收口时，默认离线测试为 **220 passed、2 skipped**；显式启用真实本地 Embedding 后另有 **1 passed**。完整集成验收在自动清理的临时目录中贯通三类 Markdown、增量索引、Chroma、三个 Tool、Router、RAG、LLM 替身、SQLite 会话/调用追踪和 FastAPI，并覆盖知识、项目、简历、面试复盘四类请求。真实 LLM 验收默认跳过，因为它需要本地密钥、网络并会产生远端调用。
+v0.3.2 收口时，默认离线测试为 **241 passed、2 skipped**；显式启用真实本地 Embedding 后另有 **1 passed**。完整集成验收在自动清理的临时目录中贯通三类 Markdown、增量索引、Chroma、三个 Tool、Router、RAG、LLM 替身、SQLite 会话/调用追踪和 FastAPI，并覆盖知识、项目、简历、面试复盘四类请求。真实 LLM 验收默认跳过，因为它需要本地密钥、网络并会产生远端调用。
 
 当前已知边界：
 
@@ -359,6 +359,7 @@ v0.3.0 收口时，默认离线测试为 **220 passed、2 skipped**；显式启�
 - 一次请求最多使用一个只读 Tool；无可靠证据时停止，不自动扩大检索链；
 - 本地共享运行时按单用户模型串行执行，第一次 `/ask` 还会同步索引；
 - 常见个人信息脱敏不是完整 DLP，不覆盖护照、银行卡或任意自由文本隐私；
+- LLM 输出没有完整的语义 DLP；在当前单机单用户、资料由本人维护的边界下暂缓，若改为多人、公网或不可信资料输入必须重新评估；
 - 引用校验能证明来源确实来自本次检索，但不能自动证明每句话都被证据语义蕴含；
 - 项目和简历阈值尚未经过 Phase 2 扩大评测集校准；
 - 真实 LLM 的回答质量、费用和供应方可用性需要在用户显式启用后验收。
@@ -367,3 +368,5 @@ v0.3.0 收口时，默认离线测试为 **220 passed、2 skipped**；显式启�
 
 - [PROJECT_SPEC.md](PROJECT_SPEC.md)：产品范围、架构和开发路线；
 - [AGENTS.md](AGENTS.md)：开发原则、模块边界和验收要求。
+- [安全最佳实践审查](docs/security/SECURITY_BEST_PRACTICES_REPORT.md)：按严重性记录发现、修复和接受风险；
+- [威胁模型](docs/security/interview-agent-threat-model.md)：记录资产、信任边界、攻击路径和风险触发条件。
