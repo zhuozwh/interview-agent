@@ -2,7 +2,7 @@
 
 ## 目标与边界
 
-该验收入口用于验证真实本地 Markdown 上的加载、切分、增量索引、路由、召回、拒答、引用和隐私边界。v0.4.0 的报告 schema v2 进一步把 raw 召回、阈值、候选排序、事实存在性和检索前策略分开归因，并输出 namespace 独立代价矩阵；验收器本身仍不会根据结果静默修改生产配置。
+该验收入口用于验证真实本地 Markdown 上的加载、切分、增量索引、路由、召回、拒答、引用和隐私边界。v0.4.1 的报告 schema v3 保留 raw 召回、阈值、候选排序、事实存在性和检索前策略归因，并增加严格 calibration/holdout 分割；验收器本身仍不会根据结果静默修改生产配置。
 
 验收命令具有以下硬边界：
 
@@ -46,12 +46,13 @@ LLM_API_KEY=
 
 ```json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "cases": [
     {
       "case_id": "N01",
       "question": "一个不含个人标识的本地问题",
       "previous_question": null,
+      "evaluation_split": "calibration",
       "expected_intent": "knowledge_question",
       "probes": [
         {
@@ -77,7 +78,9 @@ LLM_API_KEY=
 约束如下：
 
 - `case_id` 必须匿名且唯一；
-- schema v1 继续兼容既有单轮基线；schema v2 可增加可选 `previous_question`；
+- schema v1/v2 继续兼容既有 legacy 基线；schema v2 可增加可选 `previous_question`；
+- schema v3 必须同时包含 `calibration` 和 `holdout`，每个 case 必须显式声明 `evaluation_split`；
+- 两个分割都必须分别覆盖三个 namespace 的正例和负例，并同时包含硬负例与跨 namespace 探针；
 - 当前问题最长 480 字符，上一问题最长 240 字符，不允许 NUL 等控制字符；
 - 只有当前问题存在明确指代时才合并上一问题，合并后的本轮检索查询仍不得超过 480 字符；
 - `expected_paths` 只允许 POSIX 相对路径，不允许绝对路径和 `..`；
@@ -126,6 +129,7 @@ $env:RUN_REAL_VAULT_ACCEPTANCE="1"
 - 正例 Agent 闭环与负例“不调用 LLM”通过率；
 - `recall_miss`、`threshold_false_rejection`、`ranking_error`、`fact_existence_error`、`cross_namespace_policy_error` 等稳定归因；
 - 每个 namespace 的实际混淆矩阵、加权错误代价、当前阈值反事实和最佳纯阈值反事实；
+- schema v3 只从 calibration 选择最佳纯阈值，再原样应用到 holdout；报告不会输出“最佳 holdout 阈值”；
 - 多轮 case 只能引用本轮重新检索的证据，上一轮问题、回答和引用不会进入报告或持久化；
 - SQLite、LLM 替身载荷和 Vault 零修改边界；
 - 匿名失败 case ID、稳定失败分类和 Phase 2 决策触发项。

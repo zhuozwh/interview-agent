@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     summary = {
         "acceptance_passed": report["acceptance_passed"],
+        "evaluation_protocol": report["evaluation_protocol"],
         "formal_complete": report["formal_complete"],
         "safety_passed": report["safety_passed"],
         "quality_gates_passed": report["quality_gates_passed"],

@@ -271,6 +271,7 @@ def test_critical_retrieval_miss_becomes_phase2_trigger(
         "unknown_field",
         "success_without_path",
         "control_character",
+        "empty_probes",
     ),
 )
 def test_case_file_rejects_adversarial_schema(
@@ -294,9 +295,11 @@ def test_case_file_rejects_adversarial_schema(
         payload["cases"][0]["probes"][0]["expected_paths"] = []
     elif mutation == "control_character":
         payload["cases"][0]["question"] = "unsafe\u0000question"
+    elif mutation == "empty_probes":
+        payload["cases"][0]["probes"] = []
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
-    with pytest.raises(VaultAcceptanceError, match="schema version 1 or 2"):
+    with pytest.raises(VaultAcceptanceError, match="schema version 1, 2, or 3"):
         load_acceptance_cases(path)
 
 

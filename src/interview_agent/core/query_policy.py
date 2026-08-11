@@ -62,9 +62,10 @@ _EXFIL_SENSITIVE_MARKERS = (
     "身份证",
     "手机号",
     "手机号码",
-    "邮箱",
-    "微信",
-    "wechat",
+    "邮箱地址",
+    "电子邮箱",
+    "微信号",
+    "wechat id",
     "file://",
 )
 _EXFIL_BULK_OR_BYPASS_MARKERS = (
@@ -79,6 +80,9 @@ _EXFIL_BULK_OR_BYPASS_MARKERS = (
     "所有",
 )
 _DIRECT_PATH_MARKERS = ("绝对路径", "本机路径", "原始路径", "file://")
+_BULK_CONTACT_PATTERN = re.compile(
+    r"(?:全部|所有)(?:的)?(?:邮箱|微信)(?!服务|系统|协议|服务器|客户端|功能)"
+)
 
 _FACT_VERIFICATION_MARKERS = (
     "是否",
@@ -113,6 +117,15 @@ _ORGANIZATION_PATTERNS = (
 )
 _ATTRIBUTE_PAIR_PATTERN = re.compile(
     r"包含(?:了)?([\u4e00-\u9fff]{2,8})(?:和|及|、)([\u4e00-\u9fff]{2,8})"
+)
+_COMPLETE_COVERAGE_MARKERS = (
+    "同时",
+    "均使用",
+    "都使用",
+    "全部使用",
+    "分别使用",
+    "两者",
+    "二者",
 )
 _CURRENT_MARKERS = ("当前", "现在", "目前", "现用", "最新版", "开发版")
 _HISTORY_MARKERS = ("历史", "归档", "旧版", "旧版本", "曾经", "此前")
@@ -218,8 +231,14 @@ def has_sufficient_fact_evidence(
     if not anchors:
         return True
     combined = "\n".join(evidence_contents).casefold()
-    # 多组件问题可能由同一文档的相邻片段共同说明；这里至少要求一个具体
-    # 锚点真实出现，剩余锚点由回答协议明确标为未获证据支持，不能据主题推断。
+    # 明确的合取事实可由本轮多个片段共同说明，但每个具名锚点都必须出现；
+    # 普通多主题问题至少要求一个锚点，未覆盖项继续由提示词逐项标为未确认。
+    requires_complete_coverage = (
+        any(marker in question for marker in _COMPLETE_COVERAGE_MARKERS)
+        or _ATTRIBUTE_PAIR_PATTERN.search(question) is not None
+    )
+    if requires_complete_coverage:
+        return all(anchor in combined for anchor in anchors)
     return any(anchor in combined for anchor in anchors)
 
 
@@ -272,7 +291,7 @@ def _is_obvious_exfiltration(normalized: str) -> bool:
     has_action = any(marker in normalized for marker in _EXFIL_ACTION_MARKERS)
     has_sensitive_target = any(
         marker in normalized for marker in _EXFIL_SENSITIVE_MARKERS
-    )
+    ) or _BULK_CONTACT_PATTERN.search(normalized) is not None
     has_bulk_or_bypass = any(
         marker in normalized for marker in _EXFIL_BULK_OR_BYPASS_MARKERS
     )

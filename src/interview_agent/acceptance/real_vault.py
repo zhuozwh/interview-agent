@@ -61,8 +61,8 @@ from interview_agent.tools.scoped_search import (
     ScopedSearchStatus,
 )
 
-_CASE_SCHEMA_VERSIONS = (1, 2)
-_REPORT_SCHEMA_VERSION = 2
+_CASE_SCHEMA_VERSIONS = (1, 2, 3)
+_REPORT_SCHEMA_VERSION = 3
 _REQUIRED_NAMESPACES = ("notes", "projects", "resume")
 _CASE_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]{1,31}$")
 _MAX_CASE_FILE_BYTES = 1024 * 1024
@@ -89,6 +89,14 @@ class ProbeExpectation(StrEnum):
 
     SUCCESS = "success"
     NO_RESULTS = "no_results"
+
+
+class EvaluationSplit(StrEnum):
+    """区分兼容旧基线、阈值校准和只用于泛化验收的留出集。"""
+
+    LEGACY = "legacy"
+    CALIBRATION = "calibration"
+    HOLDOUT = "holdout"
 
 
 class RetrievalDiagnosis(StrEnum):
@@ -124,6 +132,7 @@ class AcceptanceCase:
     expected_intent: AgentIntent
     probes: tuple[AcceptanceProbe, ...]
     previous_question: str | None = None
+    evaluation_split: EvaluationSplit = EvaluationSplit.LEGACY
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +225,7 @@ def load_acceptance_cases(path: str | Path) -> tuple[AcceptanceCase, ...]:
         return _parse_case_payload(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise VaultAcceptanceError(
-            "The local acceptance case file does not match schema version 1 or 2."
+            "The local acceptance case file does not match schema version 1, 2, or 3."
         ) from error
 
 
@@ -432,6 +441,7 @@ def _execute_acceptance(
         "package_version": _package_version(),
         "python_version": platform.python_version(),
         "platform": platform.system().lower(),
+        "evaluation_protocol": _evaluation_protocol(cases),
         "formal_complete": not missing_namespaces,
         "missing_namespaces": list(missing_namespaces),
         "case_manifest_sha256": _case_manifest_fingerprint(cases),
@@ -571,6 +581,7 @@ def _evaluate_case(
 
     return {
         "case_id": case.case_id,
+        "evaluation_split": case.evaluation_split.value,
         "route_passed": route_passed,
         "agent_checked": agent_checked,
         "agent_expectation": (
@@ -1015,6 +1026,49 @@ def _validate_case_coverage(
         raise VaultAcceptanceError(
             "Formal acceptance requires positive coverage for all namespaces."
         )
+    if _evaluation_protocol(cases) == "calibration_holdout":
+        _validate_split_coverage(cases, loaded_namespaces=loaded_namespaces)
+
+
+def _validate_split_coverage(
+    cases: Sequence[AcceptanceCase],
+    *,
+    loaded_namespaces: tuple[str, ...],
+) -> None:
+    """校准集和留出集必须独立覆盖每个已加载域的正例与负例。"""
+    required = set(loaded_namespaces)
+    for split in (EvaluationSplit.CALIBRATION, EvaluationSplit.HOLDOUT):
+        split_cases = [case for case in cases if case.evaluation_split is split]
+        positives = {
+            probe.namespace
+            for case in split_cases
+            for probe in case.probes
+            if probe.category is ProbeCategory.POSITIVE
+        }
+        negatives = {
+            probe.namespace
+            for case in split_cases
+            for probe in case.probes
+            if probe.category is not ProbeCategory.POSITIVE
+        }
+        categories = {
+            probe.category
+            for case in split_cases
+            for probe in case.probes
+        }
+        if positives != required or negatives != required:
+            raise VaultAcceptanceError(
+                "Each evaluation split requires positive and negative coverage "
+                "for every loaded namespace."
+            )
+        if not {
+            ProbeCategory.HARD_NEGATIVE,
+            ProbeCategory.CROSS_NAMESPACE,
+        } <= categories:
+            raise VaultAcceptanceError(
+                "Each evaluation split requires hard-negative and "
+                "cross-namespace probes."
+            )
 
 
 def _snapshot_sources(
@@ -1156,7 +1210,46 @@ def _verify_llm_payloads(calls: Sequence[tuple[Any, ...]]) -> bool:
 
 
 def _calculate_metrics(case_results: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
-    """从匿名结果计算路由、召回、拒答、引用和 Agent 指标。"""
+    """计算总体指标，并让留出集只接受校准集选出的阈值。"""
+    split_names = {str(result["evaluation_split"]) for result in case_results}
+    split_protocol = split_names == {
+        EvaluationSplit.CALIBRATION.value,
+        EvaluationSplit.HOLDOUT.value,
+    }
+    metrics = _calculate_metric_set(
+        case_results,
+        include_threshold_best=not split_protocol,
+    )
+    metrics["evaluation_protocol"] = (
+        "calibration_holdout" if split_protocol else "legacy"
+    )
+    if not split_protocol:
+        return metrics
+
+    split_metrics: dict[str, dict[str, Any]] = {}
+    for split in (EvaluationSplit.CALIBRATION, EvaluationSplit.HOLDOUT):
+        scoped_results = [
+            result
+            for result in case_results
+            if result["evaluation_split"] == split.value
+        ]
+        split_metrics[split.value] = _calculate_metric_set(
+            scoped_results,
+            include_threshold_best=split is EvaluationSplit.CALIBRATION,
+        )
+    metrics["per_evaluation_split"] = split_metrics
+    metrics["calibration_threshold_transfer"] = _calculate_threshold_transfer(
+        case_results
+    )
+    return metrics
+
+
+def _calculate_metric_set(
+    case_results: Sequence[Mapping[str, Any]],
+    *,
+    include_threshold_best: bool,
+) -> dict[str, Any]:
+    """从一个明确结果集合计算路由、检索、引用和 Agent 指标。"""
     route_total = len(case_results)
     route_passed = sum(bool(result["route_passed"]) for result in case_results)
     probes = [probe for result in case_results for probe in result["probes"]]
@@ -1245,14 +1338,19 @@ def _calculate_metrics(case_results: Sequence[Mapping[str, Any]]) -> dict[str, A
                 ).items()
             )
         ),
-        "per_namespace": _calculate_namespace_metrics(probes),
+        "per_namespace": _calculate_namespace_metrics(
+            probes,
+            include_threshold_best=include_threshold_best,
+        ),
     }
 
 
 def _calculate_namespace_metrics(
     probes: Sequence[Mapping[str, Any]],
+    *,
+    include_threshold_best: bool,
 ) -> dict[str, dict[str, Any]]:
-    """分别记录三个 namespace 的实际代价和纯阈值反事实。"""
+    """记录实际代价；最佳阈值只允许从 legacy 或 calibration 选择。"""
     metrics: dict[str, dict[str, Any]] = {}
     for namespace in _REQUIRED_NAMESPACES:
         scoped = [probe for probe in probes if probe["namespace"] == namespace]
@@ -1268,36 +1366,94 @@ def _calculate_namespace_metrics(
             scoped,
             current_threshold,
         )
-        candidates = {current_threshold, -1.0, 1.0}
-        for probe in scoped:
-            for field in ("raw_hit_score", "raw_top_score"):
-                score = probe.get(field)
-                if isinstance(score, (int, float)):
-                    candidates.add(float(score))
-                    candidates.add(min(1.0, float(score) + 0.000001))
-        evaluated = [
-            {
-                "threshold": round(candidate, 6),
-                **_threshold_confusion_matrix(scoped, candidate),
-            }
-            for candidate in sorted(candidates)
-        ]
-        best = min(
-            evaluated,
-            key=lambda item: (
-                item["weighted_error_cost"],
-                item["false_positive"],
-                item["false_negative"],
-                abs(item["threshold"] - current_threshold),
-            ),
-        )
-        metrics[namespace] = {
+        namespace_metrics = {
             "current_min_score": round(current_threshold, 6),
             "actual_policy_aware": actual,
             "threshold_only_current": current_threshold_matrix,
-            "threshold_only_best": best,
         }
+        if include_threshold_best:
+            namespace_metrics["threshold_only_best"] = _best_threshold_matrix(
+                scoped,
+                current_threshold=current_threshold,
+            )
+        metrics[namespace] = namespace_metrics
     return metrics
+
+
+def _best_threshold_matrix(
+    probes: Sequence[Mapping[str, Any]],
+    *,
+    current_threshold: float,
+) -> dict[str, int | float]:
+    """只从调用方明确允许的集合选择最低代价阈值。"""
+    candidates = {current_threshold, -1.0, 1.0}
+    for probe in probes:
+        for field in ("raw_hit_score", "raw_top_score"):
+            score = probe.get(field)
+            if isinstance(score, (int, float)):
+                candidates.add(float(score))
+                candidates.add(min(1.0, float(score) + 0.000001))
+    evaluated = [
+        {
+            "threshold": round(candidate, 6),
+            **_threshold_confusion_matrix(probes, candidate),
+        }
+        for candidate in sorted(candidates)
+    ]
+    return min(
+        evaluated,
+        key=lambda item: (
+            item["weighted_error_cost"],
+            item["false_positive"],
+            item["false_negative"],
+            abs(float(item["threshold"]) - current_threshold),
+        ),
+    )
+
+
+def _calculate_threshold_transfer(
+    case_results: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """在 calibration 选阈值，再原样应用到 holdout，禁止反向调参。"""
+    probes_by_split = {
+        split.value: [
+            probe
+            for result in case_results
+            if result["evaluation_split"] == split.value
+            for probe in result["probes"]
+        ]
+        for split in (EvaluationSplit.CALIBRATION, EvaluationSplit.HOLDOUT)
+    }
+    transfer: dict[str, dict[str, Any]] = {}
+    for namespace in _REQUIRED_NAMESPACES:
+        calibration = [
+            probe
+            for probe in probes_by_split[EvaluationSplit.CALIBRATION.value]
+            if probe["namespace"] == namespace
+        ]
+        holdout = [
+            probe
+            for probe in probes_by_split[EvaluationSplit.HOLDOUT.value]
+            if probe["namespace"] == namespace
+        ]
+        if not calibration or not holdout:
+            continue
+        current_threshold = float(calibration[0]["min_score"])
+        selected = _best_threshold_matrix(
+            calibration,
+            current_threshold=current_threshold,
+        )
+        selected_threshold = float(selected["threshold"])
+        transfer[namespace] = {
+            "selected_from": EvaluationSplit.CALIBRATION.value,
+            "threshold": selected_threshold,
+            "calibration": selected,
+            "holdout": _threshold_confusion_matrix(
+                holdout,
+                selected_threshold,
+            ),
+        }
+    return transfer
 
 
 def _threshold_confusion_matrix(
@@ -1356,18 +1512,55 @@ def _phase2_triggers(
     metrics: Mapping[str, Any],
     case_results: Sequence[Mapping[str, Any]],
 ) -> list[str]:
-    """只记录进入 Phase 2 的证据，不在 v0.3.x 中实施优化。"""
+    """legacy 保持原门槛；分割协议要求 calibration 与 holdout 各自通过。"""
+    if metrics.get("evaluation_protocol") == "calibration_holdout":
+        triggers: list[str] = []
+        split_metrics = metrics["per_evaluation_split"]
+        for split in (EvaluationSplit.CALIBRATION, EvaluationSplit.HOLDOUT):
+            split_results = [
+                result
+                for result in case_results
+                if result["evaluation_split"] == split.value
+            ]
+            triggers.extend(
+                _quality_triggers(
+                    split_metrics[split.value],
+                    split_results,
+                    prefix=f"{split.value}_",
+                )
+            )
+        return triggers
+    return _quality_triggers(metrics, case_results)
+
+
+def _quality_triggers(
+    metrics: Mapping[str, Any],
+    case_results: Sequence[Mapping[str, Any]],
+    *,
+    prefix: str = "",
+) -> list[str]:
+    """对一个不可再拆分的评测集合应用固定质量与安全门槛。"""
     triggers: list[str] = []
     if metrics["hit_at_5"] < 0.9:
-        triggers.append("positive_hit_at_5_below_0_90")
+        triggers.append(f"{prefix}positive_hit_at_5_below_0_90")
     if metrics["hit_at_1"] < 0.7:
-        triggers.append("positive_hit_at_1_below_0_70")
+        triggers.append(f"{prefix}positive_hit_at_1_below_0_70")
     if metrics["mrr"] < 0.75:
-        triggers.append("positive_mrr_below_0_75")
+        triggers.append(f"{prefix}positive_mrr_below_0_75")
+    if metrics["route_accuracy"] < 1.0:
+        triggers.append(f"{prefix}route_accuracy_below_1_00")
     if metrics["hard_negative_rejection_rate"] < 0.95:
-        triggers.append("hard_negative_rejection_below_0_95")
+        triggers.append(f"{prefix}hard_negative_rejection_below_0_95")
     if metrics["cross_namespace_rejection_rate"] < 1.0:
-        triggers.append("cross_namespace_rejection_below_1_00")
+        triggers.append(f"{prefix}cross_namespace_rejection_below_1_00")
+    if metrics["positive_grounding_rate"] < 1.0:
+        triggers.append(f"{prefix}positive_grounding_below_1_00")
+    if metrics["citation_integrity_rate"] < 1.0:
+        triggers.append(f"{prefix}citation_integrity_below_1_00")
+    if metrics["agent_positive_pass_rate"] < 1.0:
+        triggers.append(f"{prefix}agent_positive_pass_below_1_00")
+    if metrics["agent_refusal_pass_rate"] < 1.0:
+        triggers.append(f"{prefix}agent_refusal_pass_below_1_00")
     if any(
         probe["category"] == ProbeCategory.POSITIVE.value
         and probe["critical"]
@@ -1375,7 +1568,7 @@ def _phase2_triggers(
         for result in case_results
         for probe in result["probes"]
     ):
-        triggers.append("critical_positive_failed")
+        triggers.append(f"{prefix}critical_positive_failed")
     return triggers
 
 
@@ -1439,8 +1632,11 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
             "probes",
         }
         allowed_fields = set(expected_fields)
-        if schema_version == 2:
+        if schema_version in {2, 3}:
             allowed_fields.add("previous_question")
+        if schema_version == 3:
+            expected_fields.add("evaluation_split")
+            allowed_fields.add("evaluation_split")
         if (
             not isinstance(raw_case, dict)
             or not expected_fields <= set(raw_case)
@@ -1462,6 +1658,13 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
         ):
             raise ValueError("invalid question")
         expected_intent = AgentIntent(raw_case["expected_intent"])
+        evaluation_split = (
+            EvaluationSplit(raw_case["evaluation_split"])
+            if schema_version == 3
+            else EvaluationSplit.LEGACY
+        )
+        if schema_version == 3 and evaluation_split is EvaluationSplit.LEGACY:
+            raise ValueError("schema version 3 cannot use legacy split")
         previous_question = raw_case.get("previous_question")
         if previous_question is not None and (
             not isinstance(previous_question, str)
@@ -1480,7 +1683,7 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
         raw_probes = raw_case["probes"]
         if (
             not isinstance(raw_probes, list)
-            or len(raw_probes) > _MAX_PROBES_PER_CASE
+            or not 1 <= len(raw_probes) <= _MAX_PROBES_PER_CASE
         ):
             raise ValueError("invalid probes")
         probes = tuple(_parse_probe(probe) for probe in raw_probes)
@@ -1497,8 +1700,13 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
                     if isinstance(previous_question, str)
                     else None
                 ),
+                evaluation_split=evaluation_split,
             )
         )
+    if schema_version == 3 and {
+        case.evaluation_split for case in cases
+    } != {EvaluationSplit.CALIBRATION, EvaluationSplit.HOLDOUT}:
+        raise ValueError("schema version 3 requires calibration and holdout")
     return tuple(cases)
 
 
@@ -1578,8 +1786,20 @@ def _case_manifest_fingerprint(cases: Sequence[AcceptanceCase]) -> str:
         # v1 问题集继续得到原有指纹；只有 v2 多轮 case 才加入新字段。
         if case.previous_question is not None:
             item["previous_question"] = case.previous_question
+        if case.evaluation_split is not EvaluationSplit.LEGACY:
+            item["evaluation_split"] = case.evaluation_split.value
         payload.append(item)
     return _sha256_json(payload)
+
+
+def _evaluation_protocol(cases: Sequence[AcceptanceCase]) -> str:
+    """旧问题集保持 legacy；schema v3 只允许严格的校准/留出协议。"""
+    splits = {case.evaluation_split for case in cases}
+    if splits == {EvaluationSplit.LEGACY}:
+        return "legacy"
+    if splits == {EvaluationSplit.CALIBRATION, EvaluationSplit.HOLDOUT}:
+        return "calibration_holdout"
+    raise VaultAcceptanceError("Acceptance cases mix incompatible evaluation splits.")
 
 
 def _configuration_fingerprint(settings: Settings) -> str:

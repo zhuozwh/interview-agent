@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前开发版本为 **v0.4.0**，已进入 **Phase 2：检索与评测增强**。
+当前开发版本为 **v0.4.1**，处于 **Phase 2：检索与评测增强**。
 
-v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 首轮先扩展匿名评测和失败归因，再以固定 45-case 三源基线证明 namespace 策略、独立阈值、事实证据门控和候选内轻量排序的必要性；没有引入混合检索或第三方重排组件。
+v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归因、namespace 策略、独立阈值、事实证据门控和候选内轻量排序；v0.4.1 进一步加入严格 calibration/holdout 协议和冻结匿名留出集。当前仍没有证据引入混合检索或第三方重排组件。
 
 已实现：
 
@@ -63,6 +63,9 @@ v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 首轮先扩展匿
 - 在原始 Top-K 内进行词面与当前/历史限定的一致性排序；
 - 一轮显式 `previous_question` 引用消解，旧回答和旧引用不会被继承；
 - 固定集 Hit@5、硬负例拒绝、跨 namespace 拒绝和引用完整性均达到 100%。
+- schema v3 强制 calibration/holdout 分割分别覆盖三域正负例；
+- 阈值只能在 calibration 选择，再原样迁移到 holdout，禁止用留出集反向调参；
+- 冻结匿名留出集覆盖邮箱技术问题误杀、合取事实、跨域和多轮引用。
 
 尚未实现：
 
@@ -99,7 +102,7 @@ python -m venv .venv
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因、代价矩阵和指标变化见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议和反思记录见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -357,9 +360,9 @@ $env:EMBEDDING_CACHE_DIRECTORY="embedding_models"
 
 源目录越界、符号链接解析后越界、扫描失败、Front Matter 未闭合、UTF-8 解码失败或内容超过上限都会抛出明确异常，不会静默跳过失败文件。
 
-## Phase 2 首轮验收与已知边界
+## Phase 2 留出验收与已知边界
 
-v0.4.0 首轮默认离线测试为 **257 passed、2 skipped**，显式真实本地 Embedding 验收另有 **1 passed**。原 45-case 三源固定集在隔离冷启动中达到 Router 100%、Hit@1 85.71%、Hit@5 100%、MRR 0.916667、硬负例拒绝 100%、跨 namespace 拒绝 100%、正负例 Agent 边界 100% 和引用完整性 100%。schema v2 合成集另外覆盖一轮引用消解、误触发防护和旧引用拒绝。真实 LLM 验收仍默认跳过，因为它需要本地密钥、网络并会产生远端调用。
+v0.4.1 默认离线测试为 **267 passed、2 skipped**；显式真实本地 Embedding 验收另有 **1 passed**，45-case 真实三源回归也已独立通过。原固定集保持 Router 100%、Hit@1 85.71%、Hit@5 100%、MRR 0.916667、硬负例拒绝 100%、跨 namespace 拒绝 100%、正负例 Agent 边界 100% 和引用完整性 100%。schema v3 匿名集合把 calibration 和 holdout 分开，两边均独立达到全部门槛；项目留出硬负例同时证明纯阈值迁移仍有代价 4，而策略感知代价为 0。真实 LLM 验收仍默认跳过，因为它需要本地密钥、网络并会产生远端调用。
 
 当前已知边界：
 
@@ -380,3 +383,4 @@ v0.4.0 首轮默认离线测试为 **257 passed、2 skipped**，显式真实本�
 - [安全最佳实践审查](docs/security/SECURITY_BEST_PRACTICES_REPORT.md)：按严重性记录发现、修复和接受风险；
 - [威胁模型](docs/security/interview-agent-threat-model.md)：记录资产、信任边界、攻击路径和风险触发条件。
 - [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)：记录失败归因、代价矩阵、指标变化和剩余风险。
+- [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)：记录 calibration/holdout 防泄漏协议、对抗结果和人工冻结点。

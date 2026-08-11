@@ -3,6 +3,7 @@
 from interview_agent.acceptance.real_vault import (
     AcceptanceCase,
     AcceptanceProbe,
+    EvaluationSplit,
     ProbeCategory,
     ProbeExpectation,
     RetrievalDiagnosis,
@@ -14,6 +15,7 @@ from interview_agent.acceptance.real_vault import (
 __all__ = [
     "AcceptanceCase",
     "AcceptanceProbe",
+    "EvaluationSplit",
     "ProbeCategory",
     "ProbeExpectation",
     "RetrievalDiagnosis",
