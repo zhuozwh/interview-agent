@@ -183,3 +183,39 @@ def test_previous_question_is_not_used_for_lexical_false_reference() -> None:
 
     assert resolved == current
     assert context_used is False
+
+
+@pytest.mark.parametrize(
+    ("current", "previous"),
+    (
+        (
+            "这个项目当前使用什么事件模型？",
+            "我的简历里后端实习做了什么？",
+        ),
+        (
+            "我的简历里该经历实现了什么模块？",
+            "我的项目当前使用 Reactor。",
+        ),
+    ),
+)
+def test_current_explicit_namespace_rejects_conflicting_previous_question(
+    current: str,
+    previous: str,
+) -> None:
+    """当前轮明确数据域时，旧数据域不能借指代词污染路由。"""
+    resolved, context_used = resolve_question_reference(current, previous)
+
+    assert resolved == current
+    assert context_used is False
+
+
+def test_referential_question_inherits_compatible_previous_namespace() -> None:
+    """当前轮只有指代、没有冲突数据域时，仍允许继承一条上一问。"""
+    current = "它如何处理连接事件？"
+    previous = "我的项目中 Reactor 当前如何实现？"
+
+    resolved, context_used = resolve_question_reference(current, previous)
+
+    assert context_used is True
+    assert previous in resolved
+    assert current in resolved

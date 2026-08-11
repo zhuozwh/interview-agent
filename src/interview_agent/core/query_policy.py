@@ -168,13 +168,10 @@ class QueryPolicyDecision:
 def infer_query_namespace(question: str) -> str | None:
     """按产品职责识别查询应进入的唯一 namespace。"""
     normalized = _normalize_question(question)
-    if any(marker in normalized for marker in _REVIEW_MARKERS):
+    explicit_namespace = _infer_explicit_namespace(normalized)
+    if explicit_namespace == "review":
         return None
-    if any(marker in normalized for marker in _RESUME_MARKERS):
-        return "resume"
-    if any(marker in normalized for marker in _PROJECT_MARKERS):
-        return "projects"
-    return "notes"
+    return explicit_namespace or "notes"
 
 
 def assess_pre_retrieval_policy(
@@ -279,11 +276,32 @@ def resolve_question_reference(
         return question.strip(), False
     if not isinstance(previous_question, str) or not previous_question.strip():
         raise ValueError("previous_question must be a non-empty string")
+    previous_normalized = _normalize_question(previous_question)
+    current_namespace = _infer_explicit_namespace(normalized)
+    previous_namespace = _infer_explicit_namespace(previous_normalized)
+    # 当前轮明确切换数据域时必须切断旧状态，避免旧标记改变路由或检索范围。
+    if (
+        current_namespace is not None
+        and previous_namespace is not None
+        and current_namespace != previous_namespace
+    ):
+        return question.strip(), False
     return (
         f"上一轮问题：{previous_question.strip()}\n"
         f"当前追问：{question.strip()}",
         True,
     )
+
+
+def _infer_explicit_namespace(normalized: str) -> str | None:
+    """只识别文本中明确声明的数据域；普通知识问题不伪装成显式 notes。"""
+    if any(marker in normalized for marker in _REVIEW_MARKERS):
+        return "review"
+    if any(marker in normalized for marker in _RESUME_MARKERS):
+        return "resume"
+    if any(marker in normalized for marker in _PROJECT_MARKERS):
+        return "projects"
+    return None
 
 
 def _is_obvious_exfiltration(normalized: str) -> bool:
