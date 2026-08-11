@@ -13,6 +13,11 @@ from numbers import Real
 from time import perf_counter_ns
 from uuid import UUID, uuid4
 
+from interview_agent.core.query_policy import (
+    assess_pre_retrieval_policy,
+    candidate_relevance_adjustment,
+    has_sufficient_fact_evidence,
+)
 from interview_agent.retrieval import (
     ChunkSearchResult,
     EmbeddingError,
@@ -96,6 +101,7 @@ class ScopedSearchResponse:
     results: tuple[ScopedSearchEvidence, ...]
     error: ScopedSearchError | None
     duration_ms: int
+    decision_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +183,7 @@ class ScopedSemanticSearchTool:
         status: ScopedSearchStatus
         results: tuple[ScopedSearchEvidence, ...] = ()
         error: ScopedSearchError | None = None
+        decision_code: str | None = None
 
         validation_error = _validate_request(request)
         if validation_error is not None:
@@ -184,25 +191,46 @@ class ScopedSemanticSearchTool:
             error = validation_error
         else:
             try:
-                raw_results = search_chunks(
-                    request.query.strip(),
-                    top_k=request.top_k,
-                    embedding_provider=self.embedding_provider,
-                    vector_store=self.vector_store,
-                    state_store=self.state_store,
-                    source_namespace=self.source_namespace,
+                query = request.query.strip()
+                policy_decision = assess_pre_retrieval_policy(
+                    query,
+                    target_namespace=self.source_namespace,
                 )
-                results = _select_evidence(
-                    raw_results,
-                    min_score=self.min_score,
-                    max_total_characters=self.max_total_characters,
-                    content_transform=self.policy.content_transform,
-                )
-                status = (
-                    ScopedSearchStatus.SUCCESS
-                    if results
-                    else ScopedSearchStatus.NO_RESULTS
-                )
+                if not policy_decision.allowed:
+                    status = ScopedSearchStatus.NO_RESULTS
+                    decision_code = policy_decision.reason_code
+                else:
+                    raw_results = search_chunks(
+                        query,
+                        top_k=request.top_k,
+                        embedding_provider=self.embedding_provider,
+                        vector_store=self.vector_store,
+                        state_store=self.state_store,
+                        source_namespace=self.source_namespace,
+                    )
+                    ranked_results = _rank_candidates(query, raw_results)
+                    results = _select_evidence(
+                        ranked_results,
+                        min_score=self.min_score,
+                        max_total_characters=self.max_total_characters,
+                        content_transform=self.policy.content_transform,
+                    )
+                    if results and not has_sufficient_fact_evidence(
+                        query,
+                        tuple(result.content for result in results),
+                        source_namespace=self.source_namespace,
+                    ):
+                        results = ()
+                        decision_code = "insufficient_fact_evidence"
+                    elif results:
+                        decision_code = "evidence_selected"
+                    else:
+                        decision_code = "below_score_threshold"
+                    status = (
+                        ScopedSearchStatus.SUCCESS
+                        if results
+                        else ScopedSearchStatus.NO_RESULTS
+                    )
             except VectorSearchInputError:
                 status = ScopedSearchStatus.INVALID_INPUT
                 error = ScopedSearchError(
@@ -265,6 +293,7 @@ class ScopedSemanticSearchTool:
             results=results,
             error=error,
             duration_ms=duration_ms,
+            decision_code=decision_code,
         )
 
         trace = ToolTraceRecord(
@@ -276,7 +305,11 @@ class ScopedSemanticSearchTool:
             duration_ms=duration_ms,
             status=status.value,
             result_count=len(results),
-            parameters=_parameter_summary(request, self),
+            parameters=_parameter_summary(
+                request,
+                self,
+                decision_code=decision_code,
+            ),
             result_ids=tuple(result.chunk_id for result in results),
             error_code=error.code if error is not None else None,
         )
@@ -296,6 +329,7 @@ class ScopedSemanticSearchTool:
                     retryable=True,
                 ),
                 duration_ms=duration_ms,
+                decision_code="trace_write_failed",
             )
         return response
 
@@ -384,9 +418,34 @@ def _select_evidence(
     return tuple(selected)
 
 
+def _rank_candidates(
+    query: str,
+    results: tuple[ChunkSearchResult, ...],
+) -> tuple[ChunkSearchResult, ...]:
+    """保留向量候选集，只对词面和时间限定明确的相邻结果稳定排序。"""
+    original_positions = {
+        result.chunk_id: position for position, result in enumerate(results)
+    }
+    return tuple(
+        sorted(
+            results,
+            key=lambda result: (
+                -(
+                    float(result.score)
+                    + candidate_relevance_adjustment(query, result.content)
+                ),
+                original_positions[result.chunk_id],
+                result.chunk_id,
+            ),
+        )
+    )
+
+
 def _parameter_summary(
     request: object,
     tool: ScopedSemanticSearchTool,
+    *,
+    decision_code: str | None,
 ) -> tuple[tuple[str, str | int | float | bool], ...]:
     """只记录安全摘要，不记录问题或任何资料正文。"""
     query = getattr(request, "query", None)
@@ -399,6 +458,7 @@ def _parameter_summary(
         else -1
     )
     return (
+        ("decision_code", decision_code or "not_applicable"),
         ("max_total_characters", tool.max_total_characters),
         ("min_score", tool.min_score),
         ("query_length", query_length),

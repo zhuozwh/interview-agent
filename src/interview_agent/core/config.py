@@ -54,9 +54,9 @@ class Settings(BaseSettings):
     # Tool 级阈值和正文预算用于拒绝弱证据，并限制返回给后续 LLM 的上下文。
     search_notes_min_score: float = 0.58
     search_notes_max_total_characters: int = 6000
-    project_context_min_score: float = 0.58
+    project_context_min_score: float = 0.535
     project_context_max_total_characters: int = 6000
-    resume_context_min_score: float = 0.58
+    resume_context_min_score: float = 0.56
     resume_context_max_total_characters: int = 3000
 
     # RAG 预算覆盖 JSON 包络、引用元数据和正文，独立于 Tool 的正文预算。

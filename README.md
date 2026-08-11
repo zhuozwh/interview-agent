@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前版本为 **v0.3.2**，**Phase 1：可用的知识问答 MVP 已完成，v0.3.x 安全收口已完成**。
+当前开发版本为 **v0.4.0**，已进入 **Phase 2：检索与评测增强**。
 
-v0.3.x 已完成真实 Vault 只读验收、Phase 2 基线准备和运行时写入边界加固。检索、切分、排序或复杂 Router 增强从 v0.4.0 开始；v0.3.2 没有提前实现 Phase 2 功能。
+v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 首轮先扩展匿名评测和失败归因，再以固定 45-case 三源基线证明 namespace 策略、独立阈值、事实证据门控和候选内轻量排序的必要性；没有引入混合检索或第三方重排组件。
 
 已实现：
 
@@ -56,11 +56,19 @@ v0.3.x 已完成真实 Vault 只读验收、Phase 2 基线准备和运行时写�
 - SQLite 保存不含问题、证据、回答正文的会话和 Agent 调用摘要；
 - 第一次 `/ask` 时延迟加载本地模型、同步索引并组装运行时；
 - 从 Markdown 到 FastAPI 响应的完整本地集成测试。
+- raw 召回、阈值误杀、排序、事实存在性和策略错误的独立评测归因；
+- notes/projects/resume 分层混淆矩阵、正负例加权代价和纯阈值反事实；
+- 显式跨 namespace 查询与明显批量敏感数据外带的检索前停止；
+- “是否存在/是否使用/是否做过”的具体实体证据门控和否定式拒答；
+- 在原始 Top-K 内进行词面与当前/历史限定的一致性排序；
+- 一轮显式 `previous_question` 引用消解，旧回答和旧引用不会被继承；
+- 固定集 Hit@5、硬负例拒绝、跨 namespace 拒绝和引用完整性均达到 100%。
 
 尚未实现：
 
 - Front Matter 字段值的语义解析；
-- Phase 2 的扩大评测集、混合检索或重排序；
+- 关键词与向量混合检索或独立重排模型（当前固定集未证明必要）；
+- 自动持久化的长会话记忆或两轮以上上下文；
 - Web 前端。
 
 ## 快速开始
@@ -91,7 +99,7 @@ python -m venv .venv
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 已完成 notes/projects/resume 三源正式基线，实际指标、已知失败和 Phase 2 触发项见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，此前双源结果保留在 [v0.3.1 预基线](docs/acceptance/V0.3.1_PREBASELINE.md)。v0.3.2 的安全审查、修复、接受风险和发布证据见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因、代价矩阵和指标变化见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -120,7 +128,7 @@ Invoke-RestMethod `
     -Body $body
 ```
 
-面试复盘在同一接口增加 `interview_record` 字段。缺少 LLM 密钥、数据源目录、索引或模型配置时，`/ask` 返回 503，但 `/health` 不会触发模型下载或远程调用，仍可用于确认进程存活。
+面试复盘在同一接口增加 `interview_record` 字段。有限多轮只接受一个可选 `previous_question`：只有当前问题包含“它、这个、上述、前面”等显式指代时才用于本轮路由和检索；服务不保存上一轮正文，不继承上一轮回答或引用，当前回答仍只能引用本轮重新检索得到的 `[S数字]`。缺少 LLM 密钥、数据源目录、索引或模型配置时，`/ask` 返回 503，但 `/health` 不会触发模型下载或远程调用，仍可用于确认进程存活。
 
 ## Markdown 只读加载、增量向量索引与检索
 
@@ -142,9 +150,9 @@ EMBEDDING_CACHE_DIRECTORY=embedding_models
 EMBEDDING_LOCAL_FILES_ONLY=false
 SEARCH_NOTES_MIN_SCORE=0.58
 SEARCH_NOTES_MAX_TOTAL_CHARACTERS=6000
-PROJECT_CONTEXT_MIN_SCORE=0.58
+PROJECT_CONTEXT_MIN_SCORE=0.535
 PROJECT_CONTEXT_MAX_TOTAL_CHARACTERS=6000
-RESUME_CONTEXT_MIN_SCORE=0.58
+RESUME_CONTEXT_MIN_SCORE=0.56
 RESUME_CONTEXT_MAX_TOTAL_CHARACTERS=3000
 RAG_CONTEXT_MAX_CHARACTERS=8000
 LLM_API_KEY=
@@ -335,7 +343,7 @@ Phase 1J 增加应用层和 HTTP 闭环。`AskInterviewAgentUseCase` 为每次�
 
 SQLite 只保存数据源命名空间、相对路径、指纹、标题路径、行号和向量配置，不保存 Markdown 正文及本机绝对路径。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
 
-`SEARCH_NOTES_MIN_SCORE=0.58` 来自 Phase 1E 收口时的最小匿名验收：5 个已确认由真实 Vault 覆盖的问题全部在 Top-5 命中，6 个 Vault 零覆盖但同样具有技术措辞的硬负例全部返回 `no_results`。这只是进入 Agent 主链前的可靠性基线，不等同于完整召回评测；Phase 2 仍会扩大固定问题集，并根据证据决定是否加入混合检索或重排序。
+Phase 2 固定集不再假设三个 namespace 共享同一分数分布。`notes=0.58` 保留 Phase 1 基线；`projects=0.535` 位于关键正例 `0.537974` 与未被事实策略覆盖的最近负例 `0.529941` 之间；`resume=0.56` 让最低关键正例 `0.561703` 进入候选。代价矩阵同时证明单靠这些较低阈值会在 projects/resume 产生 4/3 个误接受，因此它们只能与 namespace 检索前停止和事实锚点门控共同使用，不能单独视为安全校准。
 
 日常自动化测试使用确定性替身，不下载模型、调用网络或读取真实个人知识库。模型缓存已经准备好时，可以显式运行脱敏的真实模型验收：
 
@@ -349,19 +357,20 @@ $env:EMBEDDING_CACHE_DIRECTORY="embedding_models"
 
 源目录越界、符号链接解析后越界、扫描失败、Front Matter 未闭合、UTF-8 解码失败或内容超过上限都会抛出明确异常，不会静默跳过失败文件。
 
-## Phase 1 验收与已知边界
+## Phase 2 首轮验收与已知边界
 
-v0.3.2 收口时，默认离线测试为 **241 passed、2 skipped**；显式启用真实本地 Embedding 后另有 **1 passed**。完整集成验收在自动清理的临时目录中贯通三类 Markdown、增量索引、Chroma、三个 Tool、Router、RAG、LLM 替身、SQLite 会话/调用追踪和 FastAPI，并覆盖知识、项目、简历、面试复盘四类请求。真实 LLM 验收默认跳过，因为它需要本地密钥、网络并会产生远端调用。
+v0.4.0 首轮默认离线测试为 **257 passed、2 skipped**，显式真实本地 Embedding 验收另有 **1 passed**。原 45-case 三源固定集在隔离冷启动中达到 Router 100%、Hit@1 85.71%、Hit@5 100%、MRR 0.916667、硬负例拒绝 100%、跨 namespace 拒绝 100%、正负例 Agent 边界 100% 和引用完整性 100%。schema v2 合成集另外覆盖一轮引用消解、误触发防护和旧引用拒绝。真实 LLM 验收仍默认跳过，因为它需要本地密钥、网络并会产生远端调用。
 
 当前已知边界：
 
 - Router 使用可解释的固定关键词，不处理复杂多意图或开放式规划；
 - 一次请求最多使用一个只读 Tool；无可靠证据时停止，不自动扩大检索链；
+- 多轮只支持调用方显式提供一条上一轮用户问题，不持久化正文，也不支持自动长会话摘要；
 - 本地共享运行时按单用户模型串行执行，第一次 `/ask` 还会同步索引；
 - 常见个人信息脱敏不是完整 DLP，不覆盖护照、银行卡或任意自由文本隐私；
 - LLM 输出没有完整的语义 DLP；在当前单机单用户、资料由本人维护的边界下暂缓，若改为多人、公网或不可信资料输入必须重新评估；
 - 引用校验能证明来源确实来自本次检索，但不能自动证明每句话都被证据语义蕴含；
-- 项目和简历阈值尚未经过 Phase 2 扩大评测集校准；
+- 事实锚点门控只覆盖明确技术标识、引号实体、常见组织名称和属性对，不等同于开放域事实蕴含模型；
 - 真实 LLM 的回答质量、费用和供应方可用性需要在用户显式启用后验收。
 
 ## 项目文档
@@ -370,3 +379,4 @@ v0.3.2 收口时，默认离线测试为 **241 passed、2 skipped**；显式启�
 - [AGENTS.md](AGENTS.md)：开发原则、模块边界和验收要求。
 - [安全最佳实践审查](docs/security/SECURITY_BEST_PRACTICES_REPORT.md)：按严重性记录发现、修复和接受风险；
 - [威胁模型](docs/security/interview-agent-threat-model.md)：记录资产、信任边界、攻击路径和风险触发条件。
+- [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)：记录失败归因、代价矩阵、指标变化和剩余风险。

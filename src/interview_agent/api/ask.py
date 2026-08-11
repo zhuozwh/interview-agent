@@ -19,6 +19,7 @@ class AskApiRequest(BaseModel):
 
     question: str
     interview_record: str | None = None
+    previous_question: str | None = None
     session_id: str | None = None
 
 
@@ -81,6 +82,7 @@ def post_ask(
             AgentRequest(
                 question=payload.question,
                 interview_record=payload.interview_record,
+                previous_question=payload.previous_question,
             ),
             session_id=payload.session_id,
         )
@@ -141,7 +143,11 @@ def post_ask(
 
 def _http_status(status: AgentStatus, error: object) -> int:
     """把领域状态稳定映射为本地 HTTP 状态，不检查错误正文。"""
-    if status in {AgentStatus.SUCCESS, AgentStatus.NO_EVIDENCE}:
+    if status in {
+        AgentStatus.SUCCESS,
+        AgentStatus.NO_EVIDENCE,
+        AgentStatus.POLICY_REFUSED,
+    }:
         return 200
     if status in {AgentStatus.INVALID_INPUT, AgentStatus.UNSUPPORTED}:
         return 422

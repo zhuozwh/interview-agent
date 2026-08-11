@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from interview_agent.agent.models import AgentIntent, AgentRoute
+from interview_agent.core.query_policy import infer_query_namespace
 
 _REVIEW_MARKERS = (
     "面试复盘",
@@ -11,28 +12,6 @@ _REVIEW_MARKERS = (
     "面试官问",
     "复盘这场面试",
 )
-_RESUME_MARKERS = (
-    "我的简历",
-    "简历里",
-    "我的经历",
-    "我做过",
-    "我的实习",
-    "个人经历",
-    "resume",
-)
-_PROJECT_MARKERS = (
-    "我的项目",
-    "项目中",
-    "项目里",
-    "这个项目",
-    "服务框架",
-    "当前实现",
-    "实现状态",
-    "interview-agent",
-    "interview agent",
-)
-
-
 def route_question(
     question: str,
     *,
@@ -56,13 +35,14 @@ def route_question(
             tool_name=None,
             reason_code="interview_review_requires_record",
         )
-    if any(marker in normalized for marker in _RESUME_MARKERS):
+    namespace = infer_query_namespace(normalized)
+    if namespace == "resume":
         return AgentRoute(
             intent=AgentIntent.RESUME_CONTEXT,
             tool_name="get_resume_context",
             reason_code="resume_question_requires_resume_context",
         )
-    if any(marker in normalized for marker in _PROJECT_MARKERS):
+    if namespace == "projects":
         return AgentRoute(
             intent=AgentIntent.PROJECT_CONTEXT,
             tool_name="get_project_context",

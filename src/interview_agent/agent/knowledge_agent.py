@@ -21,6 +21,10 @@ from interview_agent.agent.prompts import (
 )
 from interview_agent.agent.router import route_question
 from interview_agent.core.privacy import redact_common_personal_data
+from interview_agent.core.query_policy import (
+    assess_pre_retrieval_policy,
+    resolve_question_reference,
+)
 from interview_agent.llm import LLMClient, LLMError, LLMResponse
 from interview_agent.rag import (
     Citation,
@@ -34,6 +38,7 @@ from interview_agent.tools.scoped_search import (
 )
 
 MAX_AGENT_QUESTION_CHARACTERS = 480
+MAX_PREVIOUS_QUESTION_CHARACTERS = 240
 MAX_INTERVIEW_RECORD_CHARACTERS = 12_000
 DEFAULT_AGENT_TOP_K = 5
 MAX_AGENT_ANSWER_CHARACTERS = 8_000
@@ -143,9 +148,18 @@ class KnowledgeAgent:
                 message=validation_error.message,
             )
         question = request.question.strip()
-        route = route_question(
+        resolved_question, context_used = resolve_question_reference(
             question,
+            request.previous_question,
+        )
+        route = route_question(
+            resolved_question,
             has_interview_record=request.interview_record is not None,
+        )
+        route_reason = (
+            f"{route.reason_code}_with_previous_question"
+            if context_used
+            else route.reason_code
         )
         if route.intent is AgentIntent.INTERVIEW_REVIEW:
             if request.interview_record is None:
@@ -153,15 +167,41 @@ class KnowledgeAgent:
                     trace_id=response_trace_id,
                     status=AgentStatus.INVALID_INPUT,
                     intent=route.intent,
-                    route_reason=route.reason_code,
+                    route_reason=route_reason,
                     code="interview_record_required",
                     message="interview_record is required for interview review.",
                 )
             return self._execute_interview_review(
-                question,
+                resolved_question,
                 request.interview_record.strip(),
                 trace_id=response_trace_id,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
+            )
+
+        policy_decision = assess_pre_retrieval_policy(
+            resolved_question,
+            target_namespace={
+                "search_notes": "notes",
+                "get_project_context": "projects",
+                "get_resume_context": "resume",
+            }.get(route.tool_name),
+        )
+        if not policy_decision.allowed:
+            return AgentResponse(
+                trace_id=response_trace_id,
+                status=AgentStatus.POLICY_REFUSED,
+                intent=route.intent,
+                route_reason=policy_decision.reason_code,
+                answer=(
+                    "该请求涉及明显的批量敏感信息或本机路径外带意图，"
+                    "已在检索前停止；未读取证据，也未调用 LLM。"
+                ),
+                citations=(),
+                tool_call_ids=(),
+                llm_request_id=None,
+                error=None,
+                confidence=AgentConfidence.LOW,
+                follow_up_questions=(),
             )
 
         tool = {
@@ -174,7 +214,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.UNSUPPORTED,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 answer=(
                     "当前 Agent 尚未配置该资料类型的只读 Tool，"
                     "因此没有调用 LLM，也不会根据通用知识猜测个人事实。"
@@ -187,7 +227,7 @@ class KnowledgeAgent:
 
         try:
             tool_response = tool.execute(
-                ScopedSearchRequest(query=question, top_k=self.top_k),
+                ScopedSearchRequest(query=resolved_question, top_k=self.top_k),
                 trace_id=response_trace_id,
             )
         except Exception:
@@ -195,7 +235,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INTERNAL_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 code="unexpected_tool_failure",
                 message="The retrieval Tool failed outside its stable protocol.",
             )
@@ -204,7 +244,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INTERNAL_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 code="invalid_tool_response",
                 message="The retrieval Tool returned an invalid response.",
             )
@@ -214,7 +254,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INTERNAL_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 code="invalid_tool_response",
                 message="The retrieval Tool returned an invalid identity.",
             )
@@ -224,7 +264,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INTERNAL_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 tool_call_ids=tool_call_ids,
                 code="tool_trace_mismatch",
                 message="The Tool response could not be linked to this request.",
@@ -241,22 +281,28 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INTERNAL_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 tool_call_ids=tool_call_ids,
                 code="context_build_failed",
                 message="The retrieved evidence could not be validated.",
             )
 
         if context.status is RagContextStatus.NO_EVIDENCE:
+            no_evidence_answer = (
+                "当前资料库没有找到足够可靠的证据，"
+                "因此没有调用 LLM 生成确定答案。"
+            )
+            if tool_response.decision_code == "insufficient_fact_evidence":
+                no_evidence_answer = (
+                    "本次候选片段只与主题相关，不能直接证明所问事实存在、"
+                    "被使用或确实做过，因此按否定式证据边界停止，未调用 LLM。"
+                )
             return AgentResponse(
                 trace_id=response_trace_id,
                 status=AgentStatus.NO_EVIDENCE,
                 intent=route.intent,
-                route_reason=route.reason_code,
-                answer=(
-                    "当前资料库没有找到足够可靠的证据，"
-                    "因此没有调用 LLM 生成确定答案。"
-                ),
+                route_reason=route_reason,
+                answer=no_evidence_answer,
                 citations=(),
                 tool_call_ids=tool_call_ids,
                 llm_request_id=None,
@@ -269,7 +315,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.TOOL_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 tool_call_ids=tool_call_ids,
                 code=_safe_error_code(context.error_code, "tool_failed"),
                 message="The selected retrieval Tool failed.",
@@ -278,12 +324,12 @@ class KnowledgeAgent:
 
         messages = (
             build_knowledge_answer_messages(
-                redact_common_personal_data(question),
+                redact_common_personal_data(resolved_question),
                 context,
             )
             if route.intent is AgentIntent.KNOWLEDGE_QUESTION
             else build_grounded_answer_messages(
-                redact_common_personal_data(question),
+                redact_common_personal_data(resolved_question),
                 context,
                 intent=route.intent,
             )
@@ -295,7 +341,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.LLM_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 tool_call_ids=tool_call_ids,
                 code=_safe_error_code(error.code, "llm_error"),
                 message="The answer model could not complete the request.",
@@ -306,7 +352,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INTERNAL_ERROR,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 tool_call_ids=tool_call_ids,
                 code="unexpected_llm_failure",
                 message="The answer generation failed unexpectedly.",
@@ -317,7 +363,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INVALID_OUTPUT,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 tool_call_ids=tool_call_ids,
                 code="invalid_llm_response",
                 message="The answer model returned an invalid response contract.",
@@ -328,7 +374,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INVALID_OUTPUT,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 tool_call_ids=tool_call_ids,
                 code="invalid_llm_response",
                 message="The answer model returned an invalid request identity.",
@@ -344,7 +390,7 @@ class KnowledgeAgent:
                 trace_id=response_trace_id,
                 status=AgentStatus.INVALID_OUTPUT,
                 intent=route.intent,
-                route_reason=route.reason_code,
+                route_reason=route_reason,
                 answer=None,
                 citations=(),
                 tool_call_ids=tool_call_ids,
@@ -355,7 +401,7 @@ class KnowledgeAgent:
             trace_id=response_trace_id,
             status=AgentStatus.SUCCESS,
             intent=route.intent,
-            route_reason=route.reason_code,
+            route_reason=route_reason,
             answer=llm_response.content,
             citations=validation,
             tool_call_ids=tool_call_ids,
@@ -481,6 +527,56 @@ def _validate_request(request: object) -> AgentError | None:
             ),
             retryable=False,
         )
+    if request.previous_question is not None and (
+        not isinstance(request.previous_question, str)
+        or not request.previous_question.strip()
+        or "\0" in request.previous_question
+        or not _is_valid_utf8(request.previous_question)
+    ):
+        return AgentError(
+            code="invalid_previous_question",
+            message=(
+                "previous_question must be non-empty valid UTF-8 text "
+                "without NUL."
+            ),
+            retryable=False,
+        )
+    if (
+        isinstance(request.previous_question, str)
+        and len(request.previous_question.strip())
+        > MAX_PREVIOUS_QUESTION_CHARACTERS
+    ):
+        return AgentError(
+            code="previous_question_too_long",
+            message=(
+                "previous_question must not exceed "
+                f"{MAX_PREVIOUS_QUESTION_CHARACTERS} characters."
+            ),
+            retryable=False,
+        )
+    if (
+        request.previous_question is not None
+        and request.interview_record is not None
+    ):
+        return AgentError(
+            code="previous_question_not_allowed_for_review",
+            message="previous_question is not accepted for interview review.",
+            retryable=False,
+        )
+    if request.previous_question is not None:
+        resolved, context_used = resolve_question_reference(
+            request.question.strip(),
+            request.previous_question,
+        )
+        if context_used and len(resolved) > MAX_AGENT_QUESTION_CHARACTERS:
+            return AgentError(
+                code="resolved_question_too_long",
+                message=(
+                    "The current and previous questions exceed the retrieval "
+                    "query boundary."
+                ),
+                retryable=False,
+            )
     if request.interview_record is not None and (
         not isinstance(request.interview_record, str)
         or not request.interview_record.strip()

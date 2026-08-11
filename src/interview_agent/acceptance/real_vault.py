@@ -8,6 +8,7 @@ import os
 import platform
 import re
 import sqlite3
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -21,10 +22,16 @@ from interview_agent.agent import (
     AgentRequest,
     AgentStatus,
     KnowledgeAgent,
+    MAX_PREVIOUS_QUESTION_CHARACTERS,
     route_question,
 )
 from interview_agent.core.config import Settings
 from interview_agent.core.privacy import redact_common_personal_data
+from interview_agent.core.query_policy import (
+    extract_query_anchors,
+    requires_fact_evidence,
+    resolve_question_reference,
+)
 from interview_agent.llm import LLMResponse, LLMUsage
 from interview_agent.rag import RagContextStatus, build_scoped_search_context
 from interview_agent.retrieval import (
@@ -54,7 +61,8 @@ from interview_agent.tools.scoped_search import (
     ScopedSearchStatus,
 )
 
-_SCHEMA_VERSION = 1
+_CASE_SCHEMA_VERSIONS = (1, 2)
+_REPORT_SCHEMA_VERSION = 2
 _REQUIRED_NAMESPACES = ("notes", "projects", "resume")
 _CASE_ID_PATTERN = re.compile(r"^[A-Z][A-Z0-9_-]{1,31}$")
 _MAX_CASE_FILE_BYTES = 1024 * 1024
@@ -83,6 +91,19 @@ class ProbeExpectation(StrEnum):
     NO_RESULTS = "no_results"
 
 
+class RetrievalDiagnosis(StrEnum):
+    """把质量问题定位到可独立修复的流水线阶段。"""
+
+    PASS = "pass"
+    RECALL_MISS = "recall_miss"
+    THRESHOLD_FALSE_REJECTION = "threshold_false_rejection"
+    RANKING_ERROR = "ranking_error"
+    FACT_SUFFICIENCY_FALSE_REJECTION = "fact_sufficiency_false_rejection"
+    CROSS_NAMESPACE_POLICY_ERROR = "cross_namespace_policy_error"
+    FACT_EXISTENCE_ERROR = "fact_existence_error"
+    RETRIEVAL_FALSE_ACCEPTANCE = "retrieval_false_acceptance"
+
+
 @dataclass(frozen=True, slots=True)
 class AcceptanceProbe:
     """针对固定 namespace 的匿名检索期望。"""
@@ -102,6 +123,7 @@ class AcceptanceCase:
     question: str
     expected_intent: AgentIntent
     probes: tuple[AcceptanceProbe, ...]
+    previous_question: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,13 +143,19 @@ class _AcceptanceLLM:
 
     def __init__(self) -> None:
         self.calls: list[tuple[Any, ...]] = []
+        self.expected_paths: tuple[str, ...] = ()
+
+    def expect_paths(self, paths: Sequence[str]) -> None:
+        """为下一次确定性回答选择能映射到期望来源的引用。"""
+        self.expected_paths = tuple(paths)
 
     def complete(self, messages) -> LLMResponse:
         self.calls.append(messages)
+        citation_id = _expected_citation_id(messages, self.expected_paths) or "S1"
         return LLMResponse(
             request_id=f"acceptance-request-{len(self.calls)}",
             model="deterministic-acceptance-stub",
-            content="验收占位回答，仅用于验证引用映射。[S1]",
+            content=f"验收占位回答，仅用于验证引用映射。[{citation_id}]",
             finish_reason="stop",
             system_fingerprint=None,
             usage=LLMUsage(
@@ -136,6 +164,33 @@ class _AcceptanceLLM:
                 total_tokens=2,
             ),
         )
+
+
+def _expected_citation_id(
+    messages: Sequence[Any],
+    expected_paths: Sequence[str],
+) -> str | None:
+    """从本次匿名期望中选择真实进入提示词的引用编号。"""
+    if not messages or not expected_paths:
+        return None
+    content = getattr(messages[-1], "content", None)
+    if not isinstance(content, str):
+        return None
+    try:
+        payload = json.loads(content)
+        evidence = payload["evidence_context"]["evidence"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        return None
+    expected = set(expected_paths)
+    for item in evidence:
+        try:
+            relative_path = item["source"]["relative_path"]
+            citation_id = item["citation_id"]
+        except (KeyError, TypeError):
+            continue
+        if relative_path in expected and isinstance(citation_id, str):
+            return citation_id
+    return None
 
 
 def load_acceptance_cases(path: str | Path) -> tuple[AcceptanceCase, ...]:
@@ -161,7 +216,7 @@ def load_acceptance_cases(path: str | Path) -> tuple[AcceptanceCase, ...]:
         return _parse_case_payload(payload)
     except (KeyError, TypeError, ValueError) as error:
         raise VaultAcceptanceError(
-            "The local acceptance case file does not match schema version 1."
+            "The local acceptance case file does not match schema version 1 or 2."
         ) from error
 
 
@@ -373,7 +428,7 @@ def _execute_acceptance(
         failure["code"] in safety_codes for failure in failures
     )
     return {
-        "schema_version": _SCHEMA_VERSION,
+        "schema_version": _REPORT_SCHEMA_VERSION,
         "package_version": _package_version(),
         "python_version": platform.python_version(),
         "platform": platform.system().lower(),
@@ -416,7 +471,8 @@ def _evaluate_case(
 ) -> dict[str, Any]:
     """分别评估路由、原始排名、Tool 契约和 Agent 停止条件。"""
     failures: list[dict[str, str]] = []
-    route = route_question(case.question)
+    evaluation_query = _acceptance_query(case)
+    route = route_question(evaluation_query)
     route_passed = route.intent is case.expected_intent
     if not route_passed:
         failures.append({"case_id": case.case_id, "code": "route_mismatch"})
@@ -430,7 +486,7 @@ def _evaluate_case(
             )
             continue
         raw_results = search_chunks(
-            case.question,
+            evaluation_query,
             top_k=settings.agent_top_k,
             source_namespace=probe.namespace,
             embedding_provider=embedding_provider,
@@ -439,7 +495,7 @@ def _evaluate_case(
         )
         response = tool.execute(
             ScopedSearchRequest(
-                query=case.question,
+                query=evaluation_query,
                 top_k=settings.agent_top_k,
             )
         )
@@ -450,6 +506,7 @@ def _evaluate_case(
             raw_results=raw_results,
             indexed_by_chunk=indexed_by_chunk,
             context_max_characters=settings.rag_context_max_characters,
+            min_score=float(tool.min_score),
         )
         probe_results.append(probe_result)
         failures.extend(probe_failures)
@@ -471,17 +528,34 @@ def _evaluate_case(
     agent_passed: bool | None = None
     llm_calls_before = len(llm.calls)
     if agent_checked and routed_probe is not None:
-        response = agent.execute(AgentRequest(question=case.question))
+        llm.expect_paths(
+            routed_probe.expected_paths
+            if routed_probe.expectation is ProbeExpectation.SUCCESS
+            else ()
+        )
+        response = agent.execute(
+            AgentRequest(
+                question=case.question,
+                previous_question=case.previous_question,
+            )
+        )
         llm_call_delta = len(llm.calls) - llm_calls_before
         if routed_probe.expectation is ProbeExpectation.SUCCESS:
+            expected_paths = set(routed_probe.expected_paths)
+            cited_expected_source = any(
+                citation.relative_path.replace("\\", "/") in expected_paths
+                for citation in response.citations
+            )
             agent_passed = (
                 response.status is AgentStatus.SUCCESS
                 and bool(response.citations)
+                and cited_expected_source
                 and llm_call_delta == 1
             )
         else:
             agent_passed = (
-                response.status is AgentStatus.NO_EVIDENCE
+                response.status
+                in {AgentStatus.NO_EVIDENCE, AgentStatus.POLICY_REFUSED}
                 and not response.citations
                 and llm_call_delta == 0
             )
@@ -508,6 +582,14 @@ def _evaluate_case(
     }
 
 
+def _acceptance_query(case: AcceptanceCase) -> str:
+    """复现 Agent 的单轮引用消解，但不把正文写入匿名报告。"""
+    return resolve_question_reference(
+        case.question,
+        case.previous_question,
+    )[0]
+
+
 def _evaluate_probe(
     case: AcceptanceCase,
     probe: AcceptanceProbe,
@@ -516,6 +598,7 @@ def _evaluate_probe(
     raw_results: Sequence[Any],
     indexed_by_chunk: Mapping[str, Any],
     context_max_characters: int,
+    min_score: float,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     """验证单个 namespace 的状态、命中名次、引用和脱敏。"""
     failures: list[dict[str, str]] = []
@@ -550,6 +633,14 @@ def _evaluate_probe(
         ),
         None,
     )
+    raw_hit_score = next(
+        (
+            float(result.score)
+            for result in raw_results
+            if result.relative_path.as_posix() in expected_paths
+        ),
+        None,
+    )
     hit_passed = (
         hit_rank is not None
         if probe.expectation is ProbeExpectation.SUCCESS
@@ -559,6 +650,16 @@ def _evaluate_probe(
         failures.append(
             {"case_id": case.case_id, "code": "retrieval_expectation_failed"}
         )
+
+    retrieval_passed = status_passed and namespace_passed and hit_passed
+    diagnosis = _diagnose_probe(
+        case,
+        probe,
+        response=response,
+        raw_hit_rank=raw_hit_rank,
+        raw_hit_score=raw_hit_score,
+        min_score=min_score,
+    )
 
     citation_passed = probe.expectation is ProbeExpectation.NO_RESULTS
     redaction_passed = True
@@ -591,6 +692,7 @@ def _evaluate_probe(
             "category": probe.category.value,
             "critical": probe.critical,
             "status": response.status.value,
+            "decision_code": response.decision_code,
             "passed": (
                 status_passed
                 and namespace_passed
@@ -600,16 +702,71 @@ def _evaluate_probe(
             ),
             "hit_rank": hit_rank,
             "raw_hit_rank": raw_hit_rank,
+            "raw_hit_score": (
+                round(raw_hit_score, 6) if raw_hit_score is not None else None
+            ),
             "raw_top_score": (
                 round(float(raw_results[0].score), 6) if raw_results else None
             ),
             "returned_count": len(response.results),
+            "min_score": round(min_score, 6),
+            "retrieval_passed": retrieval_passed,
+            "retrieval_diagnosis": diagnosis.value,
             "duration_ms": response.duration_ms,
             "citation_passed": citation_passed,
             "redaction_passed": redaction_passed,
         },
         failures,
     )
+
+
+def _diagnose_probe(
+    case: AcceptanceCase,
+    probe: AcceptanceProbe,
+    *,
+    response: ScopedSearchResponse,
+    raw_hit_rank: int | None,
+    raw_hit_score: float | None,
+    min_score: float,
+) -> RetrievalDiagnosis:
+    """按召回、阈值、排序、事实与策略顺序稳定定位失败。"""
+    if probe.expectation is ProbeExpectation.SUCCESS:
+        expected = set(probe.expected_paths)
+        returned_hit_rank = next(
+            (
+                result.rank
+                for result in response.results
+                if result.relative_path.replace("\\", "/") in expected
+            ),
+            None,
+        )
+        if returned_hit_rank is not None:
+            return (
+                RetrievalDiagnosis.RANKING_ERROR
+                if returned_hit_rank > 1
+                else RetrievalDiagnosis.PASS
+            )
+        if raw_hit_rank is None:
+            return RetrievalDiagnosis.RECALL_MISS
+        if response.decision_code == "insufficient_fact_evidence":
+            return RetrievalDiagnosis.FACT_SUFFICIENCY_FALSE_REJECTION
+        if raw_hit_score is not None and raw_hit_score < min_score:
+            return RetrievalDiagnosis.THRESHOLD_FALSE_REJECTION
+        return RetrievalDiagnosis.RANKING_ERROR
+
+    if not response.results:
+        return RetrievalDiagnosis.PASS
+    if probe.category is ProbeCategory.CROSS_NAMESPACE:
+        return RetrievalDiagnosis.CROSS_NAMESPACE_POLICY_ERROR
+    if (
+        probe.namespace in {"projects", "resume"}
+        and (
+            requires_fact_evidence(case.question)
+            or bool(extract_query_anchors(case.question))
+        )
+    ):
+        return RetrievalDiagnosis.FACT_EXISTENCE_ERROR
+    return RetrievalDiagnosis.RETRIEVAL_FALSE_ACCEPTANCE
 
 
 def _verify_citations(
@@ -943,6 +1100,11 @@ def _verify_database_boundary(
 ) -> bool:
     """扫描 SQLite 文本列，确保没有问题正文和绝对 Vault 路径。"""
     forbidden = [case.question for case in cases]
+    forbidden.extend(
+        case.previous_question
+        for case in cases
+        if case.previous_question is not None
+    )
     forbidden.extend(str(path) for path in source_paths)
     forbidden.extend(path.as_posix() for path in source_paths)
     try:
@@ -1075,6 +1237,118 @@ def _calculate_metrics(case_results: Sequence[Mapping[str, Any]]) -> dict[str, A
             sum(result["agent_passed"] is True for result in refusal_agents),
             len(refusal_agents),
         ),
+        "retrieval_diagnosis_counts": dict(
+            sorted(
+                Counter(
+                    str(probe["retrieval_diagnosis"])
+                    for probe in probes
+                ).items()
+            )
+        ),
+        "per_namespace": _calculate_namespace_metrics(probes),
+    }
+
+
+def _calculate_namespace_metrics(
+    probes: Sequence[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """分别记录三个 namespace 的实际代价和纯阈值反事实。"""
+    metrics: dict[str, dict[str, Any]] = {}
+    for namespace in _REQUIRED_NAMESPACES:
+        scoped = [probe for probe in probes if probe["namespace"] == namespace]
+        if not scoped:
+            continue
+        current_threshold = float(scoped[0]["min_score"])
+        actual = _confusion_matrix(
+            scoped,
+            positive_pass=lambda probe: bool(probe["retrieval_passed"]),
+            negative_rejected=lambda probe: bool(probe["retrieval_passed"]),
+        )
+        current_threshold_matrix = _threshold_confusion_matrix(
+            scoped,
+            current_threshold,
+        )
+        candidates = {current_threshold, -1.0, 1.0}
+        for probe in scoped:
+            for field in ("raw_hit_score", "raw_top_score"):
+                score = probe.get(field)
+                if isinstance(score, (int, float)):
+                    candidates.add(float(score))
+                    candidates.add(min(1.0, float(score) + 0.000001))
+        evaluated = [
+            {
+                "threshold": round(candidate, 6),
+                **_threshold_confusion_matrix(scoped, candidate),
+            }
+            for candidate in sorted(candidates)
+        ]
+        best = min(
+            evaluated,
+            key=lambda item: (
+                item["weighted_error_cost"],
+                item["false_positive"],
+                item["false_negative"],
+                abs(item["threshold"] - current_threshold),
+            ),
+        )
+        metrics[namespace] = {
+            "current_min_score": round(current_threshold, 6),
+            "actual_policy_aware": actual,
+            "threshold_only_current": current_threshold_matrix,
+            "threshold_only_best": best,
+        }
+    return metrics
+
+
+def _threshold_confusion_matrix(
+    probes: Sequence[Mapping[str, Any]],
+    threshold: float,
+) -> dict[str, int]:
+    """模拟只移动阈值、不使用 namespace 与事实策略时的结果。"""
+    return _confusion_matrix(
+        probes,
+        positive_pass=lambda probe: (
+            isinstance(probe.get("raw_hit_score"), (int, float))
+            and float(probe["raw_hit_score"]) >= threshold
+        ),
+        negative_rejected=lambda probe: (
+            not isinstance(probe.get("raw_top_score"), (int, float))
+            or float(probe["raw_top_score"]) < threshold
+        ),
+    )
+
+
+def _confusion_matrix(
+    probes: Sequence[Mapping[str, Any]],
+    *,
+    positive_pass,
+    negative_rejected,
+) -> dict[str, int]:
+    """输出正负例混淆矩阵，并按安全优先权重计算错误代价。"""
+    true_positive = false_negative = true_negative = false_positive = 0
+    weighted_error_cost = 0
+    for probe in probes:
+        if probe["category"] == ProbeCategory.POSITIVE.value:
+            if positive_pass(probe):
+                true_positive += 1
+            else:
+                false_negative += 1
+                weighted_error_cost += 2 if probe["critical"] else 1
+        elif negative_rejected(probe):
+            true_negative += 1
+        else:
+            false_positive += 1
+            weighted_error_cost += (
+                5
+                if probe["category"] == ProbeCategory.CROSS_NAMESPACE.value
+                else 4
+            )
+    return {
+        "true_positive": true_positive,
+        "false_negative": false_negative,
+        "true_negative": true_negative,
+        "false_positive": false_positive,
+        "weighted_error_cost": weighted_error_cost,
     }
 
 
@@ -1120,6 +1394,11 @@ def _write_sanitized_report(
         indent=2,
     )
     forbidden = [case.question for case in cases]
+    forbidden.extend(
+        case.previous_question
+        for case in cases
+        if case.previous_question is not None
+    )
     forbidden.extend(str(path) for path in source_paths)
     forbidden.extend(path.as_posix() for path in source_paths)
     if any(secret and secret in serialized for secret in forbidden):
@@ -1144,7 +1423,8 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
         "cases",
     }:
         raise ValueError("invalid root object")
-    if payload["schema_version"] != _SCHEMA_VERSION:
+    schema_version = payload["schema_version"]
+    if schema_version not in _CASE_SCHEMA_VERSIONS:
         raise ValueError("unsupported schema version")
     raw_cases = payload["cases"]
     if not isinstance(raw_cases, list) or not 1 <= len(raw_cases) <= _MAX_CASES:
@@ -1152,12 +1432,20 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
     cases: list[AcceptanceCase] = []
     seen_ids: set[str] = set()
     for raw_case in raw_cases:
-        if not isinstance(raw_case, dict) or set(raw_case) != {
+        expected_fields = {
             "case_id",
             "question",
             "expected_intent",
             "probes",
-        }:
+        }
+        allowed_fields = set(expected_fields)
+        if schema_version == 2:
+            allowed_fields.add("previous_question")
+        if (
+            not isinstance(raw_case, dict)
+            or not expected_fields <= set(raw_case)
+            or not set(raw_case) <= allowed_fields
+        ):
             raise ValueError("invalid case object")
         case_id = raw_case["case_id"]
         question = raw_case["question"]
@@ -1174,6 +1462,21 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
         ):
             raise ValueError("invalid question")
         expected_intent = AgentIntent(raw_case["expected_intent"])
+        previous_question = raw_case.get("previous_question")
+        if previous_question is not None and (
+            not isinstance(previous_question, str)
+            or not previous_question.strip()
+            or len(previous_question.strip()) > MAX_PREVIOUS_QUESTION_CHARACTERS
+            or _contains_control_character(previous_question)
+        ):
+            raise ValueError("invalid previous question")
+        if previous_question is not None:
+            resolved_question, context_used = resolve_question_reference(
+                question.strip(),
+                previous_question.strip(),
+            )
+            if context_used and len(resolved_question) > _MAX_QUESTION_CHARACTERS:
+                raise ValueError("resolved question is too long")
         raw_probes = raw_case["probes"]
         if (
             not isinstance(raw_probes, list)
@@ -1189,6 +1492,11 @@ def _parse_case_payload(payload: object) -> tuple[AcceptanceCase, ...]:
                 question=question.strip(),
                 expected_intent=expected_intent,
                 probes=probes,
+                previous_question=(
+                    previous_question.strip()
+                    if isinstance(previous_question, str)
+                    else None
+                ),
             )
         )
     return tuple(cases)
@@ -1250,8 +1558,9 @@ def _normalize_relative_path(value: object) -> str:
 
 def _case_manifest_fingerprint(cases: Sequence[AcceptanceCase]) -> str:
     """对本地问题集完整内容取指纹，报告本身不泄露正文。"""
-    payload = [
-        {
+    payload = []
+    for case in cases:
+        item = {
             "case_id": case.case_id,
             "question": case.question,
             "expected_intent": case.expected_intent.value,
@@ -1266,8 +1575,10 @@ def _case_manifest_fingerprint(cases: Sequence[AcceptanceCase]) -> str:
                 for probe in case.probes
             ],
         }
-        for case in cases
-    ]
+        # v1 问题集继续得到原有指纹；只有 v2 多轮 case 才加入新字段。
+        if case.previous_question is not None:
+            item["previous_question"] = case.previous_question
+        payload.append(item)
     return _sha256_json(payload)
 
 

@@ -118,6 +118,31 @@ def test_ask_returns_answer_citations_and_trace_identity() -> None:
     assert service.calls[0][1] == _SESSION_ID
 
 
+def test_ask_passes_limited_previous_question_context() -> None:
+    """HTTP 层只透传上一轮问题，不接受上一轮回答或证据。"""
+    service = FakeAskService(_success_response())
+    application = create_app(
+        Settings(_env_file=None),
+        ask_service=service,
+    )
+    response = asyncio.run(
+        _post(
+            application,
+            {
+                "question": "它如何处理连接？",
+                "previous_question": "我的项目中 Reactor 当前如何实现？",
+                "session_id": _SESSION_ID,
+            },
+        )
+    )
+
+    assert response.status_code == 200
+    request, session_id = service.calls[0]
+    assert request.question == "它如何处理连接？"
+    assert request.previous_question == "我的项目中 Reactor 当前如何实现？"
+    assert session_id == _SESSION_ID
+
+
 def test_ask_passes_interview_record_without_allowing_tool_override() -> None:
     """复盘记录进入应用层；调用方不能额外指定 Tool 或 namespace。"""
     service = FakeAskService(

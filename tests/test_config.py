@@ -33,9 +33,9 @@ def test_default_settings_load() -> None:
     assert settings.embedding_local_files_only is False
     assert settings.search_notes_min_score == 0.58
     assert settings.search_notes_max_total_characters == 6000
-    assert settings.project_context_min_score == 0.58
+    assert settings.project_context_min_score == 0.535
     assert settings.project_context_max_total_characters == 6000
-    assert settings.resume_context_min_score == 0.58
+    assert settings.resume_context_min_score == 0.56
     assert settings.resume_context_max_total_characters == 3000
     assert settings.rag_context_max_characters == 8000
     assert settings.llm_api_key is None

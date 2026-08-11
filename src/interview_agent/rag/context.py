@@ -367,6 +367,8 @@ def _validate_response_identity(
             raise RagContextInputError(
                 "response error retryable must be a boolean"
             )
+    if response.decision_code is not None:
+        _require_safe_text(response.decision_code, "decision code")
     _require_uuid(response.trace_id, "trace_id")
     _require_uuid(response.tool_call_id, "tool_call_id")
 

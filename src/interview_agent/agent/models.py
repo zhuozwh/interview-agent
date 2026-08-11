@@ -23,6 +23,7 @@ class AgentStatus(StrEnum):
     SUCCESS = "success"
     INVALID_INPUT = "invalid_input"
     UNSUPPORTED = "unsupported"
+    POLICY_REFUSED = "policy_refused"
     NO_EVIDENCE = "no_evidence"
     TOOL_ERROR = "tool_error"
     LLM_ERROR = "llm_error"
@@ -45,6 +46,7 @@ class AgentRequest:
 
     question: str
     interview_record: str | None = None
+    previous_question: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

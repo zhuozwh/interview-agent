@@ -2,7 +2,7 @@
 
 ## 目标与边界
 
-该验收入口用于验证 Phase 1 在真实本地 Markdown 上的加载、切分、增量索引、路由、召回、拒答、引用和隐私边界。它属于 v0.3.x 的验收基础设施，不改变生产 Router、阈值、切分或排序策略，也不实现 Phase 2 功能。
+该验收入口用于验证真实本地 Markdown 上的加载、切分、增量索引、路由、召回、拒答、引用和隐私边界。v0.4.0 的报告 schema v2 进一步把 raw 召回、阈值、候选排序、事实存在性和检索前策略分开归因，并输出 namespace 独立代价矩阵；验收器本身仍不会根据结果静默修改生产配置。
 
 验收命令具有以下硬边界：
 
@@ -30,9 +30,9 @@ RESUME_SOURCE_DIRECTORY=<独立 resume 目录>
 # 正式验收建议只列出三个精确源目录，不使用整个 Vault 根目录。
 ALLOWED_DATA_DIRECTORIES=["<notes>","<projects>","<resume>"]
 
-DATABASE_PATH=data/acceptance-v0.3.1/state.sqlite3
-VECTOR_STORE_PATH=vector_index/acceptance-v0.3.1
-VECTOR_COLLECTION_NAME=interview_agent_acceptance_v031
+DATABASE_PATH=data/acceptance-v0.4.0/state.sqlite3
+VECTOR_STORE_PATH=vector_index/acceptance-v0.4.0
+VECTOR_COLLECTION_NAME=interview_agent_acceptance_v040
 EMBEDDING_CACHE_DIRECTORY=embedding_models
 EMBEDDING_LOCAL_FILES_ONLY=true
 LLM_API_KEY=
@@ -46,11 +46,12 @@ LLM_API_KEY=
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "cases": [
     {
       "case_id": "N01",
       "question": "一个不含个人标识的本地问题",
+      "previous_question": null,
       "expected_intent": "knowledge_question",
       "probes": [
         {
@@ -76,7 +77,9 @@ LLM_API_KEY=
 约束如下：
 
 - `case_id` 必须匿名且唯一；
-- 问题最长 480 字符，不允许 NUL 等控制字符；
+- schema v1 继续兼容既有单轮基线；schema v2 可增加可选 `previous_question`；
+- 当前问题最长 480 字符，上一问题最长 240 字符，不允许 NUL 等控制字符；
+- 只有当前问题存在明确指代时才合并上一问题，合并后的本轮检索查询仍不得超过 480 字符；
 - `expected_paths` 只允许 POSIX 相对路径，不允许绝对路径和 `..`；
 - `positive` 必须期望 `success` 并提供至少一个可接受来源；
 - `hard_negative` 和 `cross_namespace` 必须期望 `no_results`；
@@ -90,8 +93,8 @@ LLM_API_KEY=
 ```powershell
 $env:RUN_REAL_VAULT_ACCEPTANCE="1"
 .\.venv\Scripts\python -m interview_agent.acceptance `
-  --cases acceptance_local\v0.3.1\cases.json `
-  --report acceptance_local\v0.3.1\report.json
+  --cases acceptance_local\v0.4.0\cases.json `
+  --report acceptance_local\v0.4.0\report.json
 ```
 
 缺少一个源时的预基线：
@@ -121,10 +124,13 @@ $env:RUN_REAL_VAULT_ACCEPTANCE="1"
 - 硬负例和跨 namespace 拒绝率；
 - 正例可落地率和成功证据的引用完整性；
 - 正例 Agent 闭环与负例“不调用 LLM”通过率；
+- `recall_miss`、`threshold_false_rejection`、`ranking_error`、`fact_existence_error`、`cross_namespace_policy_error` 等稳定归因；
+- 每个 namespace 的实际混淆矩阵、加权错误代价、当前阈值反事实和最佳纯阈值反事实；
+- 多轮 case 只能引用本轮重新检索的证据，上一轮问题、回答和引用不会进入报告或持久化；
 - SQLite、LLM 替身载荷和 Vault 零修改边界；
 - 匿名失败 case ID、稳定失败分类和 Phase 2 决策触发项。
 
-阈值或效果失败不会在验收器里静默调参。v0.3.x 只修复验收框架、Phase 1 正确性、安全和隐私缺陷；扩大问题集、按 namespace 校准阈值、调整切分、混合检索和重排序从 v0.4.0 开始。
+阈值或效果失败不会在验收器里静默调参。加权代价固定为：关键正例误拒绝 2、普通正例误拒绝 1、硬负例误接受 4、跨 namespace 误接受 5。该权重只用于暴露安全与可用性的取舍；不能用来删除失败样本或扩大可接受来源。只有固定集仍证明必要时，才评估混合检索、扩大候选池或独立重排模型。
 
 ## 真实 LLM
 
