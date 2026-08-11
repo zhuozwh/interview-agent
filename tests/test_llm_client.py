@@ -116,6 +116,32 @@ def test_success_sends_minimal_request_and_parses_usage() -> None:
     assert _API_KEY not in repr(client)
 
 
+@pytest.mark.parametrize("thinking_mode", ["enabled", "disabled"])
+def test_explicit_thinking_mode_uses_bounded_provider_extension(
+    thinking_mode: str,
+) -> None:
+    """显式模式只生成固定 thinking 结构，不开放任意 extra_body。"""
+    captured: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(200, json=_success_payload())
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = OpenAICompatibleLLMClient(
+        api_key=_API_KEY,
+        thinking_mode=thinking_mode,
+        http_client=http_client,
+    )
+    try:
+        client.complete(_messages())
+    finally:
+        http_client.close()
+
+    payload = json.loads(captured[0].content)
+    assert payload["thinking"] == {"type": thinking_mode}
+
+
 def test_retries_only_safe_statuses_with_bounded_delay() -> None:
     """429、502/503/504 可有限重试，并尊重不超过五秒的数字 Retry-After。"""
     statuses = [429, 503, 200]
@@ -260,6 +286,8 @@ def test_rejects_invalid_messages_before_http(messages) -> None:
         ({"base_url": "https://[::1"}, "base_url"),
         ({"base_url": "https://exa mple.com"}, "base_url"),
         ({"model": " bad "}, "model"),
+        ({"thinking_mode": "automatic"}, "provider_default"),
+        ({"thinking_mode": False}, "provider_default"),
         ({"timeout_seconds": 0}, "timeout_seconds"),
         ({"timeout_seconds": float("inf")}, "timeout_seconds"),
         ({"max_retries": 4}, "max_retries"),

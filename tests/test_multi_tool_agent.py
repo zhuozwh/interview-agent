@@ -178,7 +178,7 @@ def test_agent_selects_exactly_one_scoped_tool(
 
     payload = json.loads(llm.calls[0][1].content)
     assert payload["intent"] == intent.value
-    assert payload["prompt_version"] == "grounded-answer-v3"
+    assert payload["prompt_version"] == "grounded-answer-v4"
     assert payload["evidence_context"]["evidence"][0]["content"] == content
     assert (
         payload["evidence_context"]["evidence"][0]["source"]["namespace"]

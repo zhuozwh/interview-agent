@@ -618,7 +618,10 @@ def _validate_answer(
     if finish_reason != "stop":
         return AgentError(
             code="incomplete_llm_output",
-            message="The answer model did not finish normally.",
+            message=(
+                "The answer model did not finish normally "
+                f"(finish_reason={finish_reason})."
+            ),
             retryable=True,
         )
     if (
@@ -700,7 +703,10 @@ def _validate_review_answer(
     if finish_reason != "stop":
         return AgentError(
             code="incomplete_llm_output",
-            message="The review model did not finish normally.",
+            message=(
+                "The review model did not finish normally "
+                f"(finish_reason={finish_reason})."
+            ),
             retryable=True,
         )
     if (

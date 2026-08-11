@@ -256,7 +256,8 @@ def test_question_and_evidence_injection_remain_nested_json_data() -> None:
     system_message, user_message = llm.calls[0]
     payload = json.loads(user_message.content)
     assert payload["question"] == question
-    assert payload["prompt_version"] == "knowledge-answer-v1"
+    assert payload["prompt_version"] == "knowledge-answer-v2"
+    assert "除非问题明确要求展开，否则最多三句" in system_message.content
     assert len(payload["evidence_context"]["evidence"]) == 1
     assert (
         payload["evidence_context"]["evidence"][0]["content"]

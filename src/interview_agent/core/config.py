@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr | None = None
     llm_base_url: str = "https://api.deepseek.com"
     llm_model: str = "deepseek-v4-flash"
+    # Grounded RAG 需要短而完整的最终答案；DeepSeek V4 默认思考会与答案
+    # 共享 max_tokens，因此应用默认显式关闭，其他供应方可选 provider_default。
+    llm_thinking_mode: str = "disabled"
     llm_timeout_seconds: float = 60.0
     llm_max_retries: int = 2
     llm_temperature: float = 0.2
@@ -214,6 +217,21 @@ class Settings(BaseSettings):
             or any(ord(character) < 32 or ord(character) == 127 for character in value)
         ):
             raise ValueError("LLM base URL and model must be safe non-empty text")
+        return normalized
+
+    @field_validator("llm_thinking_mode")
+    @classmethod
+    def require_valid_llm_thinking_mode(cls, value: str) -> str:
+        """思考模式只能显式开关或保留供应方默认，不能携带任意 JSON。"""
+        if not isinstance(value, str):
+            raise ValueError(
+                "LLM_THINKING_MODE must be provider_default, enabled, or disabled"
+            )
+        normalized = value.strip().casefold()
+        if normalized not in {"provider_default", "enabled", "disabled"}:
+            raise ValueError(
+                "LLM_THINKING_MODE must be provider_default, enabled, or disabled"
+            )
         return normalized
 
     @field_validator(

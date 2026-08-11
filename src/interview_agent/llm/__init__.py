@@ -23,6 +23,7 @@ from interview_agent.llm.openai_compatible import (
     DEFAULT_LLM_MAX_TOKENS,
     DEFAULT_LLM_MODEL,
     DEFAULT_LLM_TEMPERATURE,
+    DEFAULT_LLM_THINKING_MODE,
     DEFAULT_LLM_TIMEOUT_SECONDS,
     OpenAICompatibleLLMClient,
 )
@@ -35,6 +36,7 @@ __all__ = [
     "DEFAULT_LLM_MAX_TOKENS",
     "DEFAULT_LLM_MODEL",
     "DEFAULT_LLM_TEMPERATURE",
+    "DEFAULT_LLM_THINKING_MODE",
     "DEFAULT_LLM_TIMEOUT_SECONDS",
     "LLMAuthenticationError",
     "LLMClient",

@@ -33,6 +33,7 @@ from interview_agent.tools.scoped_search import (
 _RUN_REAL_LLM_ACCEPTANCE = os.getenv("RUN_REAL_LLM_ACCEPTANCE") == "1"
 REAL_LLM_ACCEPTANCE_MAX_CALLS = 4
 REAL_LLM_ACCEPTANCE_MAX_OUTPUT_TOKENS_PER_CALL = 256
+REAL_LLM_ACCEPTANCE_TOTAL_OUTPUT_TOKEN_BUDGET = 1_024
 REAL_LLM_ACCEPTANCE_BILLING_INPUT_TOKEN_BUDGET = 10_000
 _SYNTHETIC_CANARY = "SYNTHETIC-CANARY-MUST-NOT-LEAK"
 
@@ -150,10 +151,71 @@ class _OfflineAcceptanceLLM:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _SafeCallDiagnostic:
+    """只保留非正文元数据，失败报告不得回显提示词或模型回答。"""
+
+    call_number: int
+    finish_reason: str
+    prompt_tokens: int
+    completion_tokens: int
+    reasoning_tokens: int
+    content_characters: int
+
+
+class _BudgetedDiagnosticLLM:
+    """在真实客户端外强制总预算，并记录不含正文的最小诊断。"""
+
+    def __init__(self, delegate: LLMClient) -> None:
+        self.delegate = delegate
+        self.diagnostics: list[_SafeCallDiagnostic] = []
+
+    def complete(self, messages: tuple[ChatMessage, ...]) -> LLMResponse:
+        if len(self.diagnostics) >= REAL_LLM_ACCEPTANCE_MAX_CALLS:
+            raise AssertionError("real LLM acceptance call budget exceeded")
+        response = self.delegate.complete(messages)
+        self.diagnostics.append(
+            _SafeCallDiagnostic(
+                call_number=len(self.diagnostics) + 1,
+                finish_reason=response.finish_reason,
+                prompt_tokens=response.usage.prompt_tokens,
+                completion_tokens=response.usage.completion_tokens,
+                reasoning_tokens=response.usage.reasoning_tokens,
+                content_characters=len(response.content),
+            )
+        )
+        if self.prompt_tokens > REAL_LLM_ACCEPTANCE_BILLING_INPUT_TOKEN_BUDGET:
+            raise AssertionError("real LLM acceptance input budget exceeded")
+        if self.completion_tokens > REAL_LLM_ACCEPTANCE_TOTAL_OUTPUT_TOKEN_BUDGET:
+            raise AssertionError("real LLM acceptance output budget exceeded")
+        return response
+
+    @property
+    def prompt_tokens(self) -> int:
+        return sum(item.prompt_tokens for item in self.diagnostics)
+
+    @property
+    def completion_tokens(self) -> int:
+        return sum(item.completion_tokens for item in self.diagnostics)
+
+    def safe_summary(self) -> str:
+        return "; ".join(
+            (
+                f"call={item.call_number},finish={item.finish_reason},"
+                f"prompt_tokens={item.prompt_tokens},"
+                f"completion_tokens={item.completion_tokens},"
+                f"reasoning_tokens={item.reasoning_tokens},"
+                f"content_characters={item.content_characters}"
+            )
+            for item in self.diagnostics
+        )
+
+
 def test_real_llm_acceptance_budget_and_evidence_are_frozen() -> None:
     """默认回归先证明调用数、输出预算和允许外发范围没有漂移。"""
     assert 1 + len(_GROUNDED_CASES) == REAL_LLM_ACCEPTANCE_MAX_CALLS
     assert REAL_LLM_ACCEPTANCE_MAX_OUTPUT_TOKENS_PER_CALL == 256
+    assert REAL_LLM_ACCEPTANCE_TOTAL_OUTPUT_TOKEN_BUDGET == 1_024
     assert REAL_LLM_ACCEPTANCE_BILLING_INPUT_TOKEN_BUDGET == 10_000
     assert all(case.namespace in {"notes", "projects"} for case in _GROUNDED_CASES)
     serialized = "\n".join(
@@ -195,12 +257,14 @@ def test_real_llm_obeys_grounding_and_injection_boundaries() -> None:
         api_key=settings.llm_api_key.get_secret_value(),
         base_url=settings.llm_base_url,
         model=settings.llm_model,
+        thinking_mode=settings.llm_thinking_mode,
         timeout_seconds=settings.llm_timeout_seconds,
         max_retries=0,
         temperature=0.0,
         max_tokens=REAL_LLM_ACCEPTANCE_MAX_OUTPUT_TOKENS_PER_CALL,
     ) as client:
-        public_response = client.complete(
+        monitored_client = _BudgetedDiagnosticLLM(client)
+        public_response = monitored_client.complete(
             (
                 ChatMessage(
                     role=ChatRole.SYSTEM,
@@ -217,9 +281,12 @@ def test_real_llm_obeys_grounding_and_injection_boundaries() -> None:
         assert public_response.finish_reason in {"stop", "length"}
 
         for case in _GROUNDED_CASES:
-            response = _execute_grounded_case(case, client)
+            response = _execute_grounded_case(case, monitored_client)
 
-            assert response.status is AgentStatus.SUCCESS
+            assert response.status is AgentStatus.SUCCESS, (
+                response.error,
+                monitored_client.safe_summary(),
+            )
             assert tuple(citation.citation_id for citation in response.citations) == (
                 "S1",
             )
@@ -227,6 +294,12 @@ def test_real_llm_obeys_grounding_and_injection_boundaries() -> None:
             if case.required_text is not None:
                 assert case.required_text in response.answer
             assert all(text not in response.answer for text in case.forbidden_text)
+        assert len(monitored_client.diagnostics) == REAL_LLM_ACCEPTANCE_MAX_CALLS
+        if settings.llm_thinking_mode == "disabled":
+            assert all(
+                item.reasoning_tokens == 0
+                for item in monitored_client.diagnostics
+            )
 
 
 def _execute_grounded_case(

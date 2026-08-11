@@ -41,6 +41,7 @@ def test_default_settings_load() -> None:
     assert settings.llm_api_key is None
     assert settings.llm_base_url == "https://api.deepseek.com"
     assert settings.llm_model == "deepseek-v4-flash"
+    assert settings.llm_thinking_mode == "disabled"
     assert settings.llm_timeout_seconds == 60.0
     assert settings.llm_max_retries == 2
     assert settings.llm_temperature == 0.2
@@ -83,6 +84,7 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("LLM_API_KEY", "test-only-secret")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.com/v1")
     monkeypatch.setenv("LLM_MODEL", "test-model")
+    monkeypatch.setenv("LLM_THINKING_MODE", "provider_default")
     monkeypatch.setenv("LLM_TIMEOUT_SECONDS", "15")
     monkeypatch.setenv("LLM_MAX_RETRIES", "1")
     monkeypatch.setenv("LLM_TEMPERATURE", "0.1")
@@ -130,6 +132,7 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert "test-only-secret" not in repr(settings)
     assert settings.llm_base_url == "https://llm.example.com/v1"
     assert settings.llm_model == "test-model"
+    assert settings.llm_thinking_mode == "provider_default"
     assert settings.llm_timeout_seconds == 15.0
     assert settings.llm_max_retries == 1
     assert settings.llm_temperature == 0.1
@@ -219,6 +222,8 @@ def test_rejects_invalid_rag_context_budget() -> None:
     [
         ("llm_base_url", " ", "safe non-empty"),
         ("llm_model", "bad\nmodel", "safe non-empty"),
+        ("llm_thinking_mode", "automatic", "provider_default"),
+        ("llm_thinking_mode", False, "valid string"),
         ("llm_timeout_seconds", 0, "between 1 and 600"),
         ("llm_timeout_seconds", float("inf"), "between 1 and 600"),
         ("llm_max_retries", 4, "between 0 and 3"),

@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前开发版本为 **v0.4.2**，处于 **Phase 2：检索与评测增强的真实 LLM 前置确认点**。
+当前开发版本为 **v0.4.3**，处于 **Phase 2：单轮真实 LLM 验收完成、有限多轮评估前**。
 
-v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归因、namespace 策略、独立阈值、事实证据门控和候选内轻量排序；v0.4.1 加入严格 calibration/holdout 协议和冻结匿名留出集；v0.4.2 固定真实 DeepSeek 验收的调用、token 和合成证据边界，但在用户确认前不会执行远端调用。当前仍没有证据引入混合检索或第三方重排组件。
+v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归因、namespace 策略、独立阈值、事实证据门控和候选内轻量排序；v0.4.1 加入严格 calibration/holdout 协议和冻结匿名留出集；v0.4.2 固定真实 DeepSeek 验收的调用、token 和合成证据边界；v0.4.3 在用户逐轮确认后完成真实 `deepseek-v4-flash` 四场景验收，并显式控制 DeepSeek V4 思考模式、短回答协议和实际 token 总预算。当前仍没有证据引入混合检索或第三方重排组件。
 
 已实现：
 
@@ -104,7 +104,7 @@ python -m venv .venv
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -163,6 +163,7 @@ RAG_CONTEXT_MAX_CHARACTERS=8000
 LLM_API_KEY=
 LLM_BASE_URL=https://api.deepseek.com
 LLM_MODEL=deepseek-v4-flash
+LLM_THINKING_MODE=disabled
 LLM_TIMEOUT_SECONDS=60
 LLM_MAX_RETRIES=2
 LLM_TEMPERATURE=0.2
@@ -268,7 +269,7 @@ with ChromaVectorStore(
 
 证据使用紧凑 JSON 表达，Markdown 正文始终作为转义后的字符串值存在。上下文携带“不可信只读资料”策略，文档中的伪造 JSON、提示词或工具指令不能改变引用结构；真正的权限、工具白名单和写入边界仍由确定性代码控制。`no_results` 与 Tool 故障会转换为不同的上下文状态，后续 Agent 不会把系统错误误当成“知识库没有答案”。
 
-Phase 1G 使用 `httpx` 直接调用 OpenAI-compatible `POST /chat/completions`，不依赖供应方 SDK。默认 `LLM_BASE_URL=https://api.deepseek.com`，默认模型为 `deepseek-v4-flash`；[DeepSeek 官方更新记录](https://api-docs.deepseek.com/updates)说明旧的 `deepseek-chat` 和 `deepseek-reasoner` 名称已在 2026-07-24 停用，模型变化应通过配置处理，而不是写入业务逻辑。请求和响应字段以[官方 Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion)为准。当前只实现非流式文本补全，不启用供应方 Tool Calling。
+Phase 1G 使用 `httpx` 直接调用 OpenAI-compatible `POST /chat/completions`，不依赖供应方 SDK。默认 `LLM_BASE_URL=https://api.deepseek.com`，默认模型为 `deepseek-v4-flash`；[DeepSeek 官方更新记录](https://api-docs.deepseek.com/updates)说明旧的 `deepseek-chat` 和 `deepseek-reasoner` 名称已在 2026-07-24 停用，模型变化应通过配置处理，而不是写入业务逻辑。请求和响应字段以[官方 Chat Completions 文档](https://api-docs.deepseek.com/api/create-chat-completion)为准。DeepSeek V4 默认启用思考模式，思考 token 与最终答案共享 `max_tokens`；短回答 grounded RAG 默认设置 `LLM_THINKING_MODE=disabled`，避免小预算只生成思考而没有完整答案。非 DeepSeek 兼容端点可以设置 `provider_default`，此时客户端不发送供应方扩展字段。当前只实现非流式文本补全，不启用供应方 Tool Calling。
 
 `OpenAICompatibleLLMClient` 对消息数量、单条和总字符数、输出 token、超时和重试次数设置本地上限。只对连接尚未建立、HTTP 429、502、503 和 504 自动进行有限重试；读取或写入超时可能发生在供应方已经接受并计费之后，因此不会自动重复 POST。认证、限流、无效请求、服务故障和响应结构错误会转换为稳定异常，异常不包含密钥、提示词或供应方错误正文。HTTP 只允许用于 loopback 本地兼容服务，远程地址必须使用 HTTPS。
 
@@ -292,6 +293,7 @@ with OpenAICompatibleLLMClient(
     api_key=settings.llm_api_key.get_secret_value(),
     base_url=settings.llm_base_url,
     model=settings.llm_model,
+    thinking_mode=settings.llm_thinking_mode,
     timeout_seconds=settings.llm_timeout_seconds,
     max_retries=settings.llm_max_retries,
     temperature=settings.llm_temperature,
@@ -364,7 +366,7 @@ $env:EMBEDDING_CACHE_DIRECTORY="embedding_models"
 
 ## Phase 2 留出验收与已知边界
 
-v0.4.2 默认离线测试为 **269 passed、2 skipped**；显式真实本地 Embedding 验收另有 **1 passed**，45-case 真实三源回归也已独立通过。原固定集保持 Router 100%、Hit@1 85.71%、Hit@5 100%、MRR 0.916667、硬负例拒绝 100%、跨 namespace 拒绝 100%、正负例 Agent 边界 100% 和引用完整性 100%。schema v3 匿名集合的 calibration 和 holdout 均独立达到全部门槛；受控真实 LLM 用例会先用离线替身走完相同的 Tool/RAG/引用路径，远端部分仍默认跳过，只有显式授权时才会进行固定 4 次调用。
+v0.4.3 默认离线测试为 **275 passed、2 skipped**；显式真实本地 Embedding 验收另有 **1 passed**，45-case 真实三源回归也已独立通过。原固定集保持 Router 100%、Hit@1 85.71%、Hit@5 100%、MRR 0.916667、硬负例拒绝 100%、跨 namespace 拒绝 100%、正负例 Agent 边界 100% 和引用完整性 100%。schema v3 匿名集合的 calibration 和 holdout 均独立达到全部门槛；受控真实 LLM 用例仍默认跳过，只能在用户逐项确认后显式开启。获批的最终四场景远端验收已通过，覆盖公开问答、合法引用、合取事实否定式拒答以及证据内提示注入/伪引用/路径 canary。
 
 当前已知边界：
 
@@ -376,7 +378,7 @@ v0.4.2 默认离线测试为 **269 passed、2 skipped**；显式真实本地 Emb
 - LLM 输出没有完整的语义 DLP；在当前单机单用户、资料由本人维护的边界下暂缓，若改为多人、公网或不可信资料输入必须重新评估；
 - 引用校验能证明来源确实来自本次检索，但不能自动证明每句话都被证据语义蕴含；
 - 事实锚点门控只覆盖明确技术标识、引号实体、常见组织名称和属性对，不等同于开放域事实蕴含模型；
-- 真实 LLM 的回答质量、费用和供应方可用性需要在用户显式启用后验收。
+- 真实 LLM 的单轮合成边界已通过；供应方可用性、价格和模型行为仍可能变化，真实资料外发范围仍需单独确认。
 
 ## 项目文档
 
@@ -387,3 +389,4 @@ v0.4.2 默认离线测试为 **269 passed、2 skipped**；显式真实本地 Emb
 - [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)：记录失败归因、代价矩阵、指标变化和剩余风险。
 - [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)：记录 calibration/holdout 防泄漏协议、对抗结果和人工冻结点。
 - [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)：记录 DeepSeek 模型、调用数、token、费用和证据外发确认边界。
+- [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)：记录两次失败、思考模式/输出契约修复、第三轮通过和回归结果。

@@ -202,6 +202,7 @@ def build_local_runtime(settings: Settings) -> LocalInterviewRuntime:
             api_key=settings.llm_api_key.get_secret_value(),
             base_url=settings.llm_base_url,
             model=settings.llm_model,
+            thinking_mode=settings.llm_thinking_mode,
             timeout_seconds=settings.llm_timeout_seconds,
             max_retries=settings.llm_max_retries,
             temperature=settings.llm_temperature,

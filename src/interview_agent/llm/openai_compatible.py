@@ -29,6 +29,7 @@ from interview_agent.llm.models import (
 
 DEFAULT_LLM_BASE_URL = "https://api.deepseek.com"
 DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+DEFAULT_LLM_THINKING_MODE = "provider_default"
 DEFAULT_LLM_TIMEOUT_SECONDS = 60.0
 DEFAULT_LLM_MAX_RETRIES = 2
 DEFAULT_LLM_TEMPERATURE = 0.2
@@ -50,6 +51,7 @@ _ALLOWED_FINISH_REASONS = {
     "insufficient_system_resource",
 }
 _LOOPBACK_HOSTS = {"127.0.0.1", "::1", "localhost"}
+_ALLOWED_THINKING_MODES = {"provider_default", "enabled", "disabled"}
 
 
 class OpenAICompatibleLLMClient:
@@ -61,6 +63,7 @@ class OpenAICompatibleLLMClient:
         api_key: str,
         base_url: str = DEFAULT_LLM_BASE_URL,
         model: str = DEFAULT_LLM_MODEL,
+        thinking_mode: str = DEFAULT_LLM_THINKING_MODE,
         timeout_seconds: float = DEFAULT_LLM_TIMEOUT_SECONDS,
         max_retries: int = DEFAULT_LLM_MAX_RETRIES,
         temperature: float = DEFAULT_LLM_TEMPERATURE,
@@ -70,6 +73,7 @@ class OpenAICompatibleLLMClient:
     ) -> None:
         self.base_url = _validate_base_url(base_url)
         self.model = _require_safe_non_empty(model, "model", max_length=256)
+        self.thinking_mode = _validate_thinking_mode(thinking_mode)
         self._api_key = _validate_api_key(api_key)
         self.timeout_seconds = _validate_timeout(timeout_seconds)
         self.max_retries = _validate_max_retries(max_retries)
@@ -90,6 +94,7 @@ class OpenAICompatibleLLMClient:
             f"{type(self).__name__}("
             f"base_url={self.base_url!r}, "
             f"model={self.model!r}, "
+            f"thinking_mode={self.thinking_mode!r}, "
             f"timeout_seconds={self.timeout_seconds!r}, "
             f"max_retries={self.max_retries!r})"
         )
@@ -119,6 +124,10 @@ class OpenAICompatibleLLMClient:
             "stream": False,
             "temperature": self.temperature,
         }
+        # OpenAI 标准没有 thinking 字段；仅在调用方显式选择时发送
+        # DeepSeek 兼容扩展，provider_default 保持其他供应方兼容性。
+        if self.thinking_mode != "provider_default":
+            payload["thinking"] = {"type": self.thinking_mode}
         endpoint = f"{self.base_url}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -469,6 +478,20 @@ def _validate_temperature(value: object) -> float:
     ):
         raise LLMConfigurationError("temperature must be between 0 and 2")
     return float(value)
+
+
+def _validate_thinking_mode(value: object) -> str:
+    """只允许显式开、关或完全交给供应方默认，禁止注入任意扩展体。"""
+    if not isinstance(value, str):
+        raise LLMConfigurationError(
+            "thinking_mode must be provider_default, enabled, or disabled"
+        )
+    normalized = value.strip().casefold()
+    if normalized not in _ALLOWED_THINKING_MODES:
+        raise LLMConfigurationError(
+            "thinking_mode must be provider_default, enabled, or disabled"
+        )
+    return normalized
 
 
 def _validate_max_tokens(value: object) -> int:

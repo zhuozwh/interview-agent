@@ -315,6 +315,7 @@ def test_build_local_runtime_wires_configured_three_source_workflow(
     assert result.response.status is AgentStatus.SUCCESS
     assert result.response.citations[0].source_namespace == "projects"
     assert runtime.llm_client.configuration["api_key"] == "test-only-key"
+    assert runtime.llm_client.configuration["thinking_mode"] == "disabled"
 
     database = SQLiteDatabase(database_path)
     assert len(SQLiteAgentTraceStore(database).load_records()) == 1
