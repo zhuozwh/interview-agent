@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import math
 from collections.abc import Sequence
@@ -55,6 +56,7 @@ class ChromaVectorStore:
         self._closed = False
         self._profile: VectorIndexProfile | None = None
         self._collection: Any | None = None
+        self._client: Any | None = None
 
         try:
             # 显式关闭匿名遥测；本地私人知识库不应默认向第三方发送运行信息。
@@ -79,16 +81,26 @@ class ChromaVectorStore:
         """幂等关闭 Chroma 客户端，确保临时目录和运行目录可被清理。"""
         if self._closed:
             return
+        client = self._client
+        # 先断开 Collection；其 Rust binding 不应比共享 Client 活得更久。
+        self._collection = None
+        self._profile = None
         try:
-            self._client.close()
+            if client is not None:
+                client.close()
         except Exception as error:
             raise ChromaVectorStoreError(
                 "Failed to close the local Chroma vector store"
             ) from error
         finally:
             self._closed = True
-            self._collection = None
-            self._profile = None
+            # Chroma 1.5.x 的已关闭 Client 仍保留 Rust `_server` 引用；wrapper
+            # 若继续持有 Client，Windows 可能无法及时删除 SQLite 临时文件。
+            self._client = None
+            del client
+            # close() 是低频生命周期操作；显式回收 Rust wrapper，避免 Windows
+            # 在测试或应用退出时短暂保留 chroma.sqlite3 文件句柄。
+            gc.collect()
 
     def initialize(self, profile: VectorIndexProfile) -> None:
         """打开或创建使用余弦距离的片段集合。"""
@@ -101,7 +113,12 @@ class ChromaVectorStore:
 
         try:
             # embedding_function=None 可防止 Chroma 自动下载模型或发送正文。
-            self._collection = self._client.get_or_create_collection(
+            client = self._client
+            if client is None:
+                raise ChromaVectorStoreError(
+                    "Chroma vector store client is unavailable"
+                )
+            self._collection = client.get_or_create_collection(
                 name=self.collection_name,
                 embedding_function=None,
                 metadata=_profile_metadata(profile),
@@ -124,8 +141,13 @@ class ChromaVectorStore:
         """删除旧集合并以当前模型维度和距离配置重新创建。"""
         self._require_collection()
         try:
-            self._client.delete_collection(name=self.collection_name)
-            self._collection = self._client.create_collection(
+            client = self._client
+            if client is None:
+                raise ChromaVectorStoreError(
+                    "Chroma vector store client is unavailable"
+                )
+            client.delete_collection(name=self.collection_name)
+            self._collection = client.create_collection(
                 name=self.collection_name,
                 embedding_function=None,
                 metadata=_profile_metadata(profile),
