@@ -135,6 +135,8 @@ v0.4.3 完成单轮真实 LLM 验收。首次调用暴露 DeepSeek V4 默认思�
 
 v0.4.4 完成有限一轮上下文与引用一致性收口。当前问题明确声明的 namespace 优先于上一问题；当两轮明确数据域冲突时切断旧状态，避免旧 resume/projects 标记改变当前 Router、Tool 或外发问题。只有当前轮存在显式指代且数据域兼容时才合并一条上一问题，仍不继承旧回答或旧引用，并对三域正例、跨域覆盖、词法硬负例、跨轮隐私外带和本轮引用白名单建立冻结匿名回归。该修复不改变 Top-K、阈值、可接受答案或 LLM 提示，45-case 真实 Vault 指标保持零回归；长期记忆、自动摘要和多 Tool 规划仍不进入 Phase 2。
 
+v0.4.5 完成用户独立冻结的真实 Vault holdout 验收。用户在首次运行前于 Git 忽略目录独立给出 notes 正例、projects 同域指代正例、resume 跨域切换正例，以及三域各一个硬负例；系统将它们与 6 个既有 calibration 样本组成 schema v3 的 12-case/19-probe 正式问题集。首次运行即达到 calibration 与 holdout 两个 split 的 Router、Hit@1、Hit@5、MRR、硬负例拒绝、跨 namespace 拒绝、Agent 边界和引用完整性全部 100%，0 failure、0 trigger、Vault unchanged。问题正文、相对来源映射和明细报告仍仅留在本机；本版本只提交匿名证据，不据此调整阈值或扩大答案范围。
+
 ### 阶段三：代码与项目理解
 
 - 接入 Git 代码仓库的只读扫描；
