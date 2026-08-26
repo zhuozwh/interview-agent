@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前开发版本为 **v0.4.5**，处于 **Phase 2：独立真实 Vault holdout 验收完成**。
+当前开发版本为 **v0.4.6**，处于 **Phase 2：生产装配验收收口完成**。
 
-v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归因、namespace 策略、独立阈值、事实证据门控和候选内轻量排序；v0.4.1 加入严格 calibration/holdout 协议和冻结匿名留出集；v0.4.2 固定真实 DeepSeek 验收边界；v0.4.3 完成真实 `deepseek-v4-flash` 四场景验收；v0.4.4 固定有限一轮上下文和本轮引用边界；v0.4.5 由用户在首次运行前独立冻结真实 Vault holdout，两个 split 全部门槛一次通过。当前仍没有证据引入混合检索或第三方重排组件。
+v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归因、namespace 策略、独立阈值、事实证据门控和候选内轻量排序；v0.4.1 加入严格 calibration/holdout 协议和冻结匿名留出集；v0.4.2 固定真实 DeepSeek 验收边界；v0.4.3 完成真实 `deepseek-v4-flash` 四场景验收；v0.4.4 固定有限一轮上下文和本轮引用边界；v0.4.5 由用户在首次运行前独立冻结真实 Vault holdout，两个 split 全部门槛一次通过；v0.4.6 用临时合成三源贯通生产 Settings、延迟运行时、本地检索、Router、RAG、真实 LLM 边界和 FastAPI 返回，并把远端允许证据固化为发送前白名单。当前仍没有证据引入混合检索或第三方重排组件。
 
 已实现：
 
@@ -69,6 +69,8 @@ v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归
 - 冻结匿名留出集覆盖邮箱技术问题误杀、合取事实、跨域和多轮引用。
 - 真实 LLM 验收固定为 4 次零重试调用，每次最多输出 256 token；
 - 首轮远端证据只允许公开问题与合成 notes/projects，不含真实 resume 或 Vault。
+- 生产装配端到端冒烟覆盖合成三源、本地运行时、有限一轮指代和隐私外带停止；
+- 双调用真实冒烟在发送前只允许公开 RAII 与固定合成 notes/projects 证据，不允许 resume、个人信息或本机路径。
 
 尚未实现：
 
@@ -105,7 +107,7 @@ python -m venv .venv
 
 如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)，Phase 2 最终装配证据见 [v0.4.6 生产端到端收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -367,7 +369,7 @@ $env:EMBEDDING_CACHE_DIRECTORY="embedding_models"
 
 ## Phase 2 留出验收与已知边界
 
-v0.4.5 默认离线测试为 **293 passed、2 skipped**；显式真实本地 Embedding 验收另有 **1 passed**，45-case 真实三源回归也已独立通过。原固定集保持 Router 100%、Hit@1 85.71%、Hit@5 100%、MRR 0.916667、硬负例拒绝 100%、跨 namespace 拒绝 100%、正负例 Agent 边界 100% 和引用完整性 100%。用户独立冻结的 schema v3 真实问题集包含 6 个 calibration 和 6 个 holdout case；两个 split 的 Router、Hit@1、Hit@5、MRR、硬负例拒绝、跨 namespace 拒绝、Agent 边界和引用完整性均为 100%，19 个 probe 全部通过。受控真实 LLM 用例仍默认跳过，只能在用户逐项确认后显式开启；本版本未修改提示词或远端客户端，也没有新增真实调用。
+v0.4.6 默认离线测试为 **295 passed、4 skipped**；新增跳过项是显式真实本地端到端 Embedding 和显式真实 DeepSeek 端到端冒烟。显式真实本地端到端验收另有 **1 passed**。用户批准的真实双调用冒烟已单独通过，固定两次、零重试、`thinking=disabled`，只发送公开 RAII 与合成 notes/projects 证据；其后新增的发送前白名单由默认离线测试覆盖，没有再次产生远端调用。v0.4.5 的 45-case 真实三源回归和独立 holdout 结论继续有效：原固定集 Router 100%、Hit@1 85.71%、Hit@5 100%、MRR 0.916667、硬负例拒绝 100%、跨 namespace 拒绝 100%、正负例 Agent 边界 100% 和引用完整性 100%；用户独立 holdout 的两个 split 与 19 个 probe 也全部通过。本版本没有调整阈值、Top-K、可接受答案或提示词，因此不存在用本轮真实输出反向调参。
 
 当前已知边界：
 
@@ -393,3 +395,4 @@ v0.4.5 默认离线测试为 **293 passed、2 skipped**；显式真实本地 Emb
 - [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)：记录两次失败、思考模式/输出契约修复、第三轮通过和回归结果。
 - [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)：记录 namespace 状态优先级修复、匿名多轮矩阵、引用边界和零回归证据。
 - [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)：记录用户首次运行前冻结的真实问题集、双 split 指标和隐私边界。
+- [v0.4.6 Phase 2 收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)：记录生产装配端到端、发送前白名单和最终阶段边界。

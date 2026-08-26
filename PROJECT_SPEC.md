@@ -137,6 +137,8 @@ v0.4.4 完成有限一轮上下文与引用一致性收口。当前问题明确�
 
 v0.4.5 完成用户独立冻结的真实 Vault holdout 验收。用户在首次运行前于 Git 忽略目录独立给出 notes 正例、projects 同域指代正例、resume 跨域切换正例，以及三域各一个硬负例；系统将它们与 6 个既有 calibration 样本组成 schema v3 的 12-case/19-probe 正式问题集。首次运行即达到 calibration 与 holdout 两个 split 的 Router、Hit@1、Hit@5、MRR、硬负例拒绝、跨 namespace 拒绝、Agent 边界和引用完整性全部 100%，0 failure、0 trigger、Vault unchanged。问题正文、相对来源映射和明细报告仍仅留在本机；本版本只提交匿名证据，不据此调整阈值或扩大答案范围。
 
+v0.4.6 完成 Phase 2 生产装配路径的验收收口。新增测试从临时合成三源出发，贯通生产 `Settings`、延迟运行时、本地 Embedding、Chroma、SQLite、Router、单 Tool、RAG、回答校验与 FastAPI `/ask`；真实 DeepSeek 证据仍沿用用户单独批准的固定两次、零重试调用，并在此后增加发送前的 notes/projects 合成证据白名单。明显简历外带请求继续在 Tool 和 LLM 前停止。该版本只增加验收代码和匿名报告，不修改生产检索、阈值、Top-K、Router、提示词或可接受答案；Phase 2 核心后端目标至此收口，后续只接受真实使用中可复现的缺陷，不借收尾提前进入 Phase 3。
+
 ### 阶段三：代码与项目理解
 
 - 接入 Git 代码仓库的只读扫描；
