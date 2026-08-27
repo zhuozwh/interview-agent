@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前开发版本为 **v0.5.0**，进入 **Phase 3：产品化与可用性增强**。
+当前开发版本为 **v0.5.1**，处于 **Phase 3：产品化与可用性增强**。
 
-v0.4.6 及以前保持不可变。Phase 2 已完成检索失败归因、固定 namespace、独立阈值、事实证据门控、有限一轮上下文、真实 LLM 合成边界与生产装配收口。v0.5.0 不改动这些阈值、Top-K、Router、提示词或答案接受条件；它增加本地聊天页、受控会话历史、启动前检查和一键启动/停止。Git/源码扫描、C++ 源码理解和 MATLAB 不在 v0.5.x 范围。
+v0.4.6 及以前保持不可变。Phase 2 已完成检索失败归因、固定 namespace、独立阈值、事实证据门控、有限一轮上下文、真实 LLM 合成边界与生产装配收口。v0.5.0 增加本地聊天页、受控会话历史、启动前检查和一键启动/停止；v0.5.1 修复 Windows PowerShell 5.1 对含中文 UTF-8 启停脚本的解码失败，并让批处理入口保留真实退出码。v0.5.x 不改动 Phase 2 的阈值、Top-K、Router、提示词或答案接受条件。Git/源码扫描、C++ 源码理解和 MATLAB 不在本阶段范围。
 
 已实现：
 
@@ -127,9 +127,9 @@ Windows 推荐直接双击仓库根目录的 `start.cmd`。它会先以只读方
 
 应用默认监听 `http://127.0.0.1:8000`。普通用户入口是 `GET /` 的聊天页；健康检查、问答接口和开发调试文档分别是 `GET /health`、`POST /ask` 与 `GET /docs`。
 
-不要提交包含本机配置或密钥的 `.env`。启动、健康检查、浏览聊天页和读取历史都不会加载 Embedding 或调用远端 LLM；提交实际问题时才会按既有 Phase 2 边界把当前问题和完成回答所需的最小证据发送给配置的 LLM endpoint。任何新的自动化真实远端验收仍必须另行确认模型、endpoint、次数、token、费用和允许外发范围，v0.5.0 开发与验收没有发起新远端调用。
+不要提交包含本机配置或密钥的 `.env`。启动、健康检查、浏览聊天页和读取历史都不会加载 Embedding 或调用远端 LLM；提交实际问题时才会按既有 Phase 2 边界把当前问题和完成回答所需的最小证据发送给配置的 LLM endpoint。任何新的自动化真实远端验收仍必须另行确认模型、endpoint、次数、token、费用和允许外发范围；v0.5.0 与 v0.5.1 的开发和验收均没有发起新远端调用。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)，Phase 2 最终装配证据见 [v0.4.6 生产端到端收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)，v0.5.0 的产品化证据见 [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)，Phase 2 最终装配证据见 [v0.4.6 生产端到端收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)，v0.5.0 的产品化证据见 [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)，Windows 启动热修复证据见 [v0.5.1 Windows 启动闭环](docs/acceptance/V0.5.1_WINDOWS_STARTUP_HOTFIX.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -428,6 +428,10 @@ Windows 实机演示先后暴露并修复了虚拟环境启动器 PID 与真实�
 
 Phase 2 的旧生产装配夹具显式关闭 v0.5 正文历史后，继续证明审计 SQLite 不含问题或源正文；v0.5 独立夹具同时证明默认历史只保存受控字段并可删除。检索、Router、RAG、LLM 提示和引用校验文件均未修改，冻结阈值仍是 notes `0.58`、projects `0.535`、resume `0.56`。
 
+## Phase 3 v0.5.1 Windows 启动热修复
+
+v0.5.1 来自真实用户入口失败：`start.cmd` 在 Windows PowerShell 5.1 下先因无 BOM 的 UTF-8 中文脚本被系统代码页误读而语法失败；修复后又在当前宿主同时提供 `Path` / `PATH` 时触发 `Start-Process` 的重复键异常。修复为给两个 PowerShell 入口写入 UTF-8 BOM、在启动子进程前规范化当前脚本进程的 Path 键，并让 `.cmd` 保存 PowerShell 的真实退出码后再决定是否暂停。实机以系统 `powershell.exe -File` 和两个 `.cmd` 完成启动、HTTP 200 首页、`/health=ok` 与停止闭环；默认离线回归为 **330 passed、4 skipped**。详细证据见 [v0.5.1 Windows 启动闭环](docs/acceptance/V0.5.1_WINDOWS_STARTUP_HOTFIX.md)。
+
 ## 项目文档
 
 - [PROJECT_SPEC.md](PROJECT_SPEC.md)：产品范围、架构和开发路线；
@@ -442,3 +446,4 @@ Phase 2 的旧生产装配夹具显式关闭 v0.5 正文历史后，继续证明
 - [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)：记录用户首次运行前冻结的真实问题集、双 split 指标和隐私边界。
 - [v0.4.6 Phase 2 收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)：记录生产装配端到端、发送前白名单和最终阶段边界。
 - [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)：记录聊天界面、受控历史、preflight、一键启停、失败归因和 Phase 2 零退化证据。
+- [v0.5.1 Windows 启动闭环](docs/acceptance/V0.5.1_WINDOWS_STARTUP_HOTFIX.md)：记录系统 PowerShell 5.1 中文脚本解码失败、热修复和真实双击入口验收。

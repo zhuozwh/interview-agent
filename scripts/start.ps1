@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [switch]$NoBrowser,
     [switch]$CheckOnly
@@ -35,6 +35,38 @@ function Test-RecordedProcess($record) {
     } catch {
         return $false
     }
+}
+
+function Repair-DuplicateProcessPathKeys {
+    # Codex 等宿主可能同时注入 Path/PATH；PowerShell 5.1 的 Start-Process
+    # 会把它们放入不区分大小写的字典并直接失败，因此只在当前脚本进程内归一化。
+    $environment = [System.Environment]::GetEnvironmentVariables("Process")
+    $pathKeys = @(
+        $environment.Keys | Where-Object { [string]$_ -ieq "Path" }
+    )
+    if ($pathKeys.Count -le 1) {
+        return
+    }
+
+    $canonicalKey = $pathKeys |
+        Where-Object { [string]$_ -ceq "Path" } |
+        Select-Object -First 1
+    if ($null -eq $canonicalKey) {
+        $canonicalKey = $pathKeys[0]
+    }
+    $canonicalValue = [string]$environment[$canonicalKey]
+    foreach ($pathKey in $pathKeys) {
+        [System.Environment]::SetEnvironmentVariable(
+            [string]$pathKey,
+            $null,
+            "Process"
+        )
+    }
+    [System.Environment]::SetEnvironmentVariable(
+        "Path",
+        $canonicalValue,
+        "Process"
+    )
 }
 
 if (-not (Test-Path -LiteralPath $pythonPath -PathType Leaf)) {
@@ -86,6 +118,7 @@ New-Item -ItemType Directory -Path $runDirectory -Force | Out-Null
 New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
 
 # 停止令牌和 PID 文件位置只传给子进程，由真实服务进程写入自身 PID。
+Repair-DuplicateProcessPathKeys
 $shutdownToken = [guid]::NewGuid().ToString("N")
 $previousToken = $env:INTERVIEW_AGENT_SHUTDOWN_TOKEN
 $previousPidFile = $env:INTERVIEW_AGENT_PID_FILE
