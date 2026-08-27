@@ -2,7 +2,7 @@
 
 ## Executive summary
 
-最高风险集中在两个边界：本地敏感 Markdown 进入远端 LLM，以及本地单用户 FastAPI 被错误地扩展为网络服务。当前默认 loopback、固定单 Tool、来源白名单、提示词数据包络、引用校验、简历脱敏和无正文追踪显著降低了风险。v0.3.2 额外关闭了运行时写入路径与只读数据源重叠的配置缺口。没有 Critical/High 威胁；完整输出语义 DLP、认证和请求级网络防护在当前使用模型下是有条件的 Medium/Low 残余风险。
+最高风险集中在两个边界：本地敏感 Markdown 进入远端 LLM，以及本地单用户 FastAPI 被错误地扩展为网络服务。当前默认 loopback、固定单 Tool、来源白名单、提示词数据包络、引用校验、简历脱敏和无正文审计追踪显著降低了风险。v0.3.2 关闭了运行时写入路径与只读数据源重叠的配置缺口；v0.5.0 新增可删除、有限保留的本地聊天正文，因此 SQLite 也成为明确的敏感数据资产。没有 Critical/High 威胁；完整输出语义 DLP、认证、请求级网络防护和同账户本地明文读取在当前使用模型下是有条件的 Medium/Low 残余风险。
 
 ## Scope and assumptions
 
@@ -18,11 +18,11 @@
 
 ### Primary components
 
-- 本地 HTTP 入口：FastAPI 的 `/health`、`/ask` 和开发文档；证据锚点：`src/interview_agent/main.py:18-67`、`src/interview_agent/api/ask.py:15-152`。
+- 本地 HTTP 入口：FastAPI 的聊天页、`/health`、`/ask`、历史 CRUD、令牌停止入口和开发文档；证据锚点：`src/interview_agent/main.py`、`src/interview_agent/api/*.py`。
 - 应用运行时：延迟创建本地模型、SQLite、Chroma、三只读 Tool 和 LLM 客户端，并串行执行；证据锚点：`src/interview_agent/application/runtime.py:58-258`。
 - Router/Agent：确定性选择零个或一个 Tool，构造受限提示词，校验引用和输出；证据锚点：`src/interview_agent/agent/knowledge_agent.py:121-453`。
 - 数据源加载与索引：只读扫描三个互斥 Markdown 目录，切分、Embedding、增量写入 SQLite/Chroma；证据锚点：`src/interview_agent/retrieval/markdown.py:55-210`、`src/interview_agent/retrieval/vector_index.py`。
-- 本地存储：SQLite 保存状态/安全追踪摘要，Chroma 保存正文、向量和相对引用元数据；证据锚点：`src/interview_agent/storage/sqlite.py`、`src/interview_agent/storage/chroma.py`。
+- 本地存储：SQLite 的索引/审计表保存状态和无正文摘要，独立聊天表保存有限问题、已校验回答和展示引用；Chroma 保存证据正文、向量和相对引用元数据；证据锚点：`src/interview_agent/storage/*.py`。
 - 远端 LLM：通过 OpenAI-compatible HTTPS Chat Completions 接口发送一次有界请求；证据锚点：`src/interview_agent/llm/openai_compatible.py`。
 - 开发与验收：pytest 使用替身和临时目录；真实 Vault 验收强制本地 Embedding、拒绝 LLM、比较前后指纹；证据锚点：`src/interview_agent/acceptance/real_vault.py`、`tests/test_real_vault_acceptance.py`。
 
@@ -34,7 +34,9 @@
 - Agent -> Tool/Chroma：确定性 Router 固定 namespace，调用方不能提供路径、namespace 或任意查询表达式；只返回有界 Top-K。
 - Agent -> 远端 LLM：脱敏问题和有界证据经 HTTPS JSON 发送；httpx 禁止环境代理和重定向；简历证据脱敏，但 notes/projects 仍可能包含私人自由文本。
 - Agent -> SQLite Trace：只写 trace/session/tool/LLM ID、状态、耗时、长度和引用 ID；不写问题、记录、证据或回答正文。
+- API -> SQLite History：默认保存当前问题、已校验回答、稳定状态和展示引用；不保存证据正文、完整 Vault、提示词、密钥、`interview_record`、`previous_question` 或内部片段标识，并受时间/数量清理和显式删除约束。
 - Agent -> 本机用户：回答、相对引用和安全错误经 JSON 返回；输出校验阻止未知引用、外部链接和绝对路径，但不是完整语义 DLP。
+- Stop script -> FastAPI：Git 忽略 PID 文件中的随机令牌经自定义请求头进入隐藏停止入口；PID、进程映像和启动时间匹配后才发起，错误令牌统一返回 404。
 
 #### Diagram
 
@@ -52,6 +54,7 @@ flowchart LR
     AG --> LLM["Remote LLM"]
     AG --> SQL
     AG --> API
+    API --> HIST["SQLite bounded chat history"]
 ```
 
 ## Assets and security objectives
@@ -61,7 +64,7 @@ flowchart LR
 | notes/projects/resume Markdown | 含个人知识、项目事实、面试记录和简历隐私；必须保持原文权威 | C/I/A |
 | LLM API 密钥 | 泄漏会造成费用、配额和账户滥用 | C/I |
 | Chroma 片段正文和向量 | 可反推出私人资料并影响检索证据 | C/I/A |
-| SQLite 元数据和追踪 | 决定增量索引、引用定位和审计关联 | I/A，部分 C |
+| SQLite 元数据、追踪和聊天历史 | 决定增量索引、引用定位和审计关联；聊天表含问题与回答正文 | C/I/A |
 | Agent 系统规则和 Tool 白名单 | 防止提示注入改变权限或制造写入 | I |
 | 引用与回答 | 影响个人经历真实性和面试准备质量 | I |
 | Embedding 模型和依赖 | 被替换会影响检索完整性或执行本地恶意代码 | I/A |
@@ -90,11 +93,13 @@ flowchart LR
 | Surface | How reached | Trust boundary | Notes | Evidence (repo path / symbol) |
 |---|---|---|---|---|
 | `POST /ask` | loopback HTTP JSON | 用户 -> FastAPI | 无认证；字段严格，长度在 Agent 层限制 | `src/interview_agent/api/ask.py:15-152` |
+| `GET/DELETE /api/history` | loopback HTTP JSON | 用户 -> History Store | 有限正文；同源 UI；逐会话/全部删除 | `src/interview_agent/api/history.py` |
+| `POST /api/system/shutdown` | loopback HTTP + 随机令牌 | Stop script -> Server | 不进 OpenAPI；错误令牌 404；回调仅设置 Uvicorn 退出标记 | `src/interview_agent/api/system.py` |
 | `.env`/环境变量 | 进程启动 | 本机配置 -> Runtime | 包含密钥、路径、模型和阈值 | `src/interview_agent/core/config.py:11-272` |
 | Markdown 源目录 | 本地文件系统 | Vault -> Loader | 真实路径、白名单、大小和 UTF-8 校验 | `src/interview_agent/retrieval/markdown.py:55-210` |
 | 本地模型缓存 | FastEmbed 延迟加载 | 包下载/缓存 -> 进程 | 只接受 FastEmbed 支持模型 | `src/interview_agent/retrieval/fastembed_provider.py:44-140` |
 | Chroma 持久化 | 本地目录 | Index/Tool -> Store | 保存正文；遥测关闭；元数据严格解码 | `src/interview_agent/storage/chroma.py:35-345` |
-| SQLite | 本地数据库文件 | Runtime -> Store | 参数化查询；保存状态和安全摘要 | `src/interview_agent/storage/*.py` |
+| SQLite | 本地数据库文件 | Runtime/UI -> Store | 参数化查询；审计无正文，聊天正文有限保留并可删除 | `src/interview_agent/storage/*.py` |
 | LLM Chat Completions | HTTPS POST | Agent -> Provider | 密钥、问题和证据跨出本机 | `src/interview_agent/llm/openai_compatible.py` |
 | LLM 响应 | HTTPS JSON | Provider -> Agent | 大小、结构、完成原因、引用和链接校验 | `src/interview_agent/llm/openai_compatible.py`、`agent/knowledge_agent.py` |
 | 真实 Vault 验收 CLI | 显式本地命令 | Operator -> Acceptance | 读取真实源，写匿名本地报告；禁止 LLM | `src/interview_agent/acceptance/real_vault.py` |
@@ -109,6 +114,8 @@ flowchart LR
 5. 本机恶意进程篡改 Chroma 正文或元数据 -> Tool 读取污染证据 -> 严格元数据/引用身份校验阻断部分损坏，但语义正确性仍可能被污染。
 6. 依赖或模型供应链发布恶意/回归版本 -> 宽版本安装获得新构件 -> 在本地进程权限内执行或改变检索；当前通过主版本上限、支持模型目录和发布测试降低概率。
 7. 网络攻击者发送超大 JSON -> ASGI 先解析请求 -> Agent 长度校验发生较晚 -> 消耗内存；当前 loopback-only 使概率低。
+8. 同账户进程读取 SQLite -> 获得本地聊天问题和回答 -> 暴露用户学习/求职内容；当前依赖 Windows 账户权限、Git 忽略、有限保留和用户删除降低范围，但没有应用层加密。
+9. 同账户进程窃取 `.run` 停止令牌 -> 请求隐藏 shutdown 入口 -> 造成可恢复的本地服务中断；不会获得 Vault 或密钥，正常下次启动可恢复。
 
 ## Threat model table
 
@@ -121,13 +128,15 @@ flowchart LR
 | TM-005 | 同账户本地进程 | 能写 SQLite/Chroma | 篡改索引、状态或证据正文 | 错误引用、拒答或虚构支持 | Chroma、SQLite、回答 | 严格元数据解码、索引配置指纹、引用映射 | 无文件签名或加密认证 | 共享设备时增加 ACL、磁盘加密和重建命令；必要时校验存储清单 | 索引指纹变化、异常重建和解码错误 | Low | Medium | low |
 | TM-006 | 依赖/模型供应链 | 重新安装或首次模型下载 | 投递恶意或回归构件 | 本机代码执行、检索完整性下降 | 源码环境、模型、Vault 可读权限 | 主版本上限、FastEmbed 支持模型列表、CPU provider、离线模式、测试 | 无 lockfile/SBOM/哈希 | 在 CI/分发前锁定依赖并记录模型工件摘要 | 安装清单 diff、依赖扫描、模型指纹 | Low | High | low |
 | TM-007 | 网络或本机调用者 | 能向 API 发送请求 | 发送大请求或高频请求，占用串行运行时和 LLM预算 | 延迟、内存、费用 | 可用性、预算 | Agent 字符上限、一次 Tool/LLM、超时、有限重试、串行锁 | 请求体在解析前无字节上限；无速率限制 | 仅在共享/公网时由代理或中间件限制 body/rate/concurrency | 请求大小、429、队列时间和费用告警 | Low | Medium | low |
+| TM-008 | 同账户本地进程或备份读取者 | 可读取运行时 SQLite | 读取聊天问题、回答和展示引用 | 学习、求职和个人上下文披露 | 聊天历史 | Git 忽略；有限时间/数量；逐会话/全部删除；不保存证据正文、面试记录或密钥 | 无应用层加密；无独立目录 ACL | 共享设备关闭历史或使用系统磁盘加密；备份前清理；多人场景重新设计权限 | 历史配置与数据库备份清单 | Low | Medium | low |
+| TM-009 | 同账户本地进程 | 可读取 `.run` 或调用 loopback | 窃取令牌并停止服务 | 可恢复的本地可用性中断 | 本地服务 | 128-bit 随机令牌；Git 忽略；隐藏接口；错误令牌 404；正常退出清理 PID 文件 | 同账户恶意进程本就能终止用户进程 | 保持单用户边界；多人/服务化时改用 OS 服务控制和 ACL | 非预期 shutdown 与启动日志 | Low | Low | low |
 
 ## Criticality calibration
 
 - Critical：当前本地边界下可在无本机权限前提直接远程执行代码、读取完整 Vault 或窃取 API 密钥；或默认配置即可不可恢复地批量破坏原文。例：默认公网未认证的任意文件读取；Markdown 直接触发系统命令；启动即递归删除 Vault。当前未发现。
 - High：需要有限前提即可泄漏大量简历/笔记、稳定绕过来源边界或造成显著远端费用。例：loopback 服务实际被发布到公网且可枚举完整资料；任意 namespace/path 参数绕过；密钥进入错误响应。当前未发现默认成立项。
 - Medium：依赖部署边界改变、恶意文档被召回或错误供应方配置，可能造成部分隐私披露、事实污染或费用。TM-002、TM-003、TM-004 属于此级。
-- Low：需要同账户写权限、明显配置失误或易恢复的本地 DoS，且已有硬控制或重建路径。TM-001 修复后的残余风险、TM-005、TM-006、TM-007 属于此级。
+- Low：需要同账户权限、明显配置失误或易恢复的本地 DoS，且已有硬控制或重建路径。TM-001 修复后的残余风险、TM-005、TM-006、TM-007、TM-008、TM-009 属于此级。
 
 ## Focus paths for security review
 
@@ -142,6 +151,9 @@ flowchart LR
 | `src/interview_agent/api/ask.py` | 无认证 HTTP 入口和响应暴露 | TM-003, TM-007 |
 | `src/interview_agent/storage/chroma.py` | 私人正文持久化、遥测和损坏元数据处理 | TM-005 |
 | `src/interview_agent/storage/agent_trace.py` | 审计数据是否意外保存正文或路径 | TM-004, TM-005 |
+| `src/interview_agent/storage/conversation_history.py` | 聊天正文最小化、保留期、删除和绝对引用边界 | TM-005, TM-008 |
+| `src/interview_agent/api/history.py` | 本地正文读取和删除接口 | TM-003, TM-008 |
+| `src/interview_agent/api/system.py`、`scripts/*.ps1` | 停止令牌、PID 身份和可用性边界 | TM-009 |
 | `src/interview_agent/acceptance/real_vault.py` | 真实 Vault 指纹、匿名报告和运行时写入隔离 | TM-001, TM-002 |
 | `pyproject.toml` | 依赖安装与供应链复现性 | TM-006 |
 

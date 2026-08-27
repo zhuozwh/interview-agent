@@ -286,6 +286,9 @@ def _settings(
         "resume_source_directory": resume,
         "allowed_data_directories": (notes.parent,),
         "database_path": root / "runtime" / "state.sqlite3",
+        # 本夹具冻结的是 v0.4.6 的无正文审计边界；v0.5.0 受控正文历史
+        # 由独立测试覆盖，因此这里显式关闭，继续验证 Phase 2 不变量。
+        "session_history_enabled": False,
         "vector_store_path": root / "runtime" / "chroma",
         "embedding_cache_directory": Path("embedding_models").resolve(),
         "embedding_local_files_only": True,

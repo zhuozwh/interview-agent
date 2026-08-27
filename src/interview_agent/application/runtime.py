@@ -153,14 +153,7 @@ def build_local_runtime(settings: Settings) -> LocalInterviewRuntime:
     if settings.llm_api_key is None:
         raise ApplicationUnavailableError("LLM_API_KEY is not configured.")
 
-    source_paths = _require_disjoint_source_directories(
-        (
-            settings.markdown_source_directory,
-            settings.project_source_directory,
-            settings.resume_source_directory,
-        )
-    )
-    _require_runtime_paths_outside_sources(settings, source_paths)
+    source_paths = validate_local_storage_boundaries(settings)
     database = SQLiteDatabase(settings.database_path)
     state_store = SQLiteIndexStateStore(database)
     tool_trace_store = SQLiteToolTraceStore(database)
@@ -287,6 +280,23 @@ def _require_disjoint_source_directories(
     return resolved[0], resolved[1], resolved[2]
 
 
+def validate_local_storage_boundaries(
+    settings: Settings,
+) -> tuple[Path, Path, Path]:
+    """在任何本地状态写入前验证只读数据源与运行时路径隔离。"""
+    if not isinstance(settings, Settings):
+        raise ValueError("settings must be a Settings instance")
+    source_paths = _require_disjoint_source_directories(
+        (
+            settings.markdown_source_directory,
+            settings.project_source_directory,
+            settings.resume_source_directory,
+        )
+    )
+    _require_runtime_paths_outside_sources(settings, source_paths)
+    return source_paths
+
+
 def _require_runtime_paths_outside_sources(
     settings: Settings,
     source_directories: tuple[Path, Path, Path],
@@ -366,4 +376,5 @@ __all__ = [
     "LazyLocalAskService",
     "LocalInterviewRuntime",
     "build_local_runtime",
+    "validate_local_storage_boundaries",
 ]

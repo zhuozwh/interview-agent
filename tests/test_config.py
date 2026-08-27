@@ -16,6 +16,10 @@ def test_default_settings_load() -> None:
     assert settings.app_env == "local"
     assert settings.log_level == "INFO"
     assert settings.database_path == Path("data/interview_agent.db")
+    assert settings.session_history_enabled is True
+    assert settings.session_history_retention_days == 30
+    assert settings.session_history_max_sessions == 100
+    assert settings.session_history_max_turns_per_session == 100
 
     # Phase 1A 的默认配置只面向仓库下的 knowledge 目录，并带有安全读取上限。
     assert settings.markdown_source_directory == Path("knowledge/interview")
@@ -56,6 +60,10 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.setenv("DATABASE_PATH", "temporary/test.db")
+    monkeypatch.setenv("SESSION_HISTORY_ENABLED", "false")
+    monkeypatch.setenv("SESSION_HISTORY_RETENTION_DAYS", "14")
+    monkeypatch.setenv("SESSION_HISTORY_MAX_SESSIONS", "20")
+    monkeypatch.setenv("SESSION_HISTORY_MAX_TURNS_PER_SESSION", "40")
 
     # 复杂类型使用 JSON 数组传入，模拟 .env 中允许多个数据目录的写法。
     monkeypatch.setenv("MARKDOWN_SOURCE_DIRECTORY", "temporary/notes")
@@ -105,6 +113,10 @@ def test_environment_variables_override_settings(monkeypatch) -> None:
     assert settings.app_env == "test"
     assert settings.log_level == "DEBUG"
     assert settings.database_path == Path("temporary/test.db")
+    assert settings.session_history_enabled is False
+    assert settings.session_history_retention_days == 14
+    assert settings.session_history_max_sessions == 20
+    assert settings.session_history_max_turns_per_session == 40
     assert settings.markdown_source_directory == Path("temporary/notes")
     assert settings.project_source_directory == Path("temporary/projects")
     assert settings.resume_source_directory == Path("temporary/resume")
@@ -247,6 +259,27 @@ def test_blank_llm_api_key_is_treated_as_unconfigured() -> None:
     """示例配置中的空密钥不能被误认为有效凭据。"""
     settings = Settings(llm_api_key=" ", _env_file=None)
     assert settings.llm_api_key is None
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value", "message"),
+    [
+        ("session_history_retention_days", 0, "between 1 and 3650"),
+        ("session_history_retention_days", 3651, "between 1 and 3650"),
+        ("session_history_max_sessions", 0, "between 1 and 1000"),
+        ("session_history_max_sessions", 1001, "between 1 and 1000"),
+        ("session_history_max_turns_per_session", 0, "between 1 and 1000"),
+        ("session_history_max_turns_per_session", True, "must not be boolean"),
+    ],
+)
+def test_rejects_invalid_session_history_limits(
+    field_name: str,
+    value: int,
+    message: str,
+) -> None:
+    """历史正文的时间和数量边界不能被非法配置关闭。"""
+    with pytest.raises(ValidationError, match=message):
+        Settings(**{field_name: value}, _env_file=None)
 
 
 @pytest.mark.parametrize(

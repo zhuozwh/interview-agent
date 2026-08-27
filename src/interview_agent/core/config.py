@@ -27,6 +27,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_path: Path = Path("data/interview_agent.db")
 
+    # 本地聊天历史与既有审计追踪共用 SQLite 文件，但使用独立数据表。
+    # 三个上限共同约束正文生命周期，避免历史随使用时间无界增长。
+    session_history_enabled: bool = True
+    session_history_retention_days: int = 30
+    session_history_max_sessions: int = 100
+    session_history_max_turns_per_session: int = 100
+
     # Markdown 源目录表示真正要扫描的文件夹；允许目录则是它不能越过的安全边界。
     # 使用元组而不是可变列表，避免应用运行期间意外改变读取白名单。
     markdown_source_directory: Path = Path("knowledge/interview")
@@ -297,6 +304,49 @@ class Settings(BaseSettings):
         if not 1 <= value <= 20_000:
             raise ValueError(
                 "AGENT_MAX_ANSWER_CHARACTERS must be between 1 and 20000"
+            )
+        return value
+
+    @field_validator(
+        "session_history_retention_days",
+        "session_history_max_sessions",
+        "session_history_max_turns_per_session",
+        mode="before",
+    )
+    @classmethod
+    def reject_boolean_history_limits(cls, value):
+        """布尔值不能表达聊天历史的数量或保留天数。"""
+        if isinstance(value, bool):
+            raise ValueError("Session history limits must not be boolean")
+        return value
+
+    @field_validator("session_history_retention_days")
+    @classmethod
+    def require_valid_history_retention(cls, value: int) -> int:
+        """正文保留期需要有限且足以完成日常面试准备。"""
+        if not 1 <= value <= 3650:
+            raise ValueError(
+                "SESSION_HISTORY_RETENTION_DAYS must be between 1 and 3650"
+            )
+        return value
+
+    @field_validator("session_history_max_sessions")
+    @classmethod
+    def require_valid_history_session_limit(cls, value: int) -> int:
+        """限制本机最多保留的聊天会话数量。"""
+        if not 1 <= value <= 1000:
+            raise ValueError(
+                "SESSION_HISTORY_MAX_SESSIONS must be between 1 and 1000"
+            )
+        return value
+
+    @field_validator("session_history_max_turns_per_session")
+    @classmethod
+    def require_valid_history_turn_limit(cls, value: int) -> int:
+        """限制单个会话保留的问答轮数。"""
+        if not 1 <= value <= 1000:
+            raise ValueError(
+                "SESSION_HISTORY_MAX_TURNS_PER_SESSION must be between 1 and 1000"
             )
         return value
 

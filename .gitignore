@@ -25,6 +25,7 @@ embedding_models/
 *.faiss
 *.index
 logs/
+.run/
 
 # 真实 Vault 验收的本地问题集和明细报告，可能包含私人资料映射
 acceptance_local/

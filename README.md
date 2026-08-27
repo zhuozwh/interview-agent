@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前开发版本为 **v0.4.6**，处于 **Phase 2：生产装配验收收口完成**。
+当前开发版本为 **v0.5.0**，进入 **Phase 3：产品化与可用性增强**。
 
-v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归因、namespace 策略、独立阈值、事实证据门控和候选内轻量排序；v0.4.1 加入严格 calibration/holdout 协议和冻结匿名留出集；v0.4.2 固定真实 DeepSeek 验收边界；v0.4.3 完成真实 `deepseek-v4-flash` 四场景验收；v0.4.4 固定有限一轮上下文和本轮引用边界；v0.4.5 由用户在首次运行前独立冻结真实 Vault holdout，两个 split 全部门槛一次通过；v0.4.6 用临时合成三源贯通生产 Settings、延迟运行时、本地检索、Router、RAG、真实 LLM 边界和 FastAPI 返回，并把远端允许证据固化为发送前白名单。当前仍没有证据引入混合检索或第三方重排组件。
+v0.4.6 及以前保持不可变。Phase 2 已完成检索失败归因、固定 namespace、独立阈值、事实证据门控、有限一轮上下文、真实 LLM 合成边界与生产装配收口。v0.5.0 不改动这些阈值、Top-K、Router、提示词或答案接受条件；它增加本地聊天页、受控会话历史、启动前检查和一键启动/停止。Git/源码扫描、C++ 源码理解和 MATLAB 不在 v0.5.x 范围。
 
 已实现：
 
@@ -56,6 +56,12 @@ v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归
 - SQLite 保存不含问题、证据、回答正文的会话和 Agent 调用摘要；
 - 第一次 `/ask` 时延迟加载本地模型、同步索引并组装运行时；
 - 从 Markdown 到 FastAPI 响应的完整本地集成测试。
+- 根路径 `/` 的本地聊天界面，无需直接使用 FastAPI `/docs`；
+- 回答、相对引用、置信提示、安全错误和建议追问的浏览器展示；
+- SQLite 受控会话历史、保留期与数量上限、逐会话删除和全部清空；
+- 历史正文与 Phase 2 无正文审计分表隔离，禁用历史时不建立正文表；
+- 只读 preflight，以及可双击的 `start.cmd` / `stop.cmd`；
+- 真实服务 PID、解释器映像、启动时间和随机令牌共同保护优雅停止；
 - raw 召回、阈值误杀、排序、事实存在性和策略错误的独立评测归因；
 - notes/projects/resume 分层混淆矩阵、正负例加权代价和纯阈值反事实；
 - 显式跨 namespace 查询与明显批量敏感数据外带的检索前停止；
@@ -77,11 +83,12 @@ v0.3.2 保持不可变并继续作为 Phase 2 起点。v0.4.0 已建立失败归
 - Front Matter 字段值的语义解析；
 - 关键词与向量混合检索或独立重排模型（当前固定集未证明必要）；
 - 自动持久化的长会话记忆或两轮以上上下文；
-- Web 前端。
+- Git/源码扫描、C++ 源码理解或 MATLAB 接入；
+- 知识库写入、多用户权限或公网部署。
 
 ## 快速开始
 
-要求 Python 3.11 或更高版本。以下命令适用于 PowerShell。
+要求 Python 3.11 或更高版本。首次使用先复制 `.env.example` 为未提交的 `.env`，配置三个互斥只读数据源和 `LLM_API_KEY`，再创建环境并安装：
 
 创建环境并安装：
 
@@ -91,7 +98,22 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -e ".[dev]"
 ```
 
-启动应用：
+Windows 推荐直接双击仓库根目录的 `start.cmd`。它会先以只读方式检查 Python、密钥、三源隔离、Markdown、Embedding 缓存条件和 `127.0.0.1:8000`，通过后在后台启动并打开聊天页。停止时双击 `stop.cmd`；停止脚本只接受本机随机令牌，并再次核验真实服务 PID、解释器映像和启动时间。
+
+也可以在 PowerShell 中运行：
+
+```powershell
+.\scripts\start.ps1
+.\scripts\stop.ps1
+```
+
+只执行检查、不启动：
+
+```powershell
+.\scripts\start.ps1 -CheckOnly
+```
+
+开发调试时可绕过后台脚本以前台方式启动：
 
 ```powershell
 .\.venv\Scripts\python -m interview_agent.main
@@ -103,11 +125,11 @@ python -m venv .venv
 .\.venv\Scripts\python -m pytest
 ```
 
-应用默认监听 `http://127.0.0.1:8000`，健康检查地址为 `http://127.0.0.1:8000/health`，问答接口和可视化调试文档分别为 `POST /ask` 与 `GET /docs`。
+应用默认监听 `http://127.0.0.1:8000`。普通用户入口是 `GET /` 的聊天页；健康检查、问答接口和开发调试文档分别是 `GET /health`、`POST /ask` 与 `GET /docs`。
 
-如需修改本地配置，可复制 `.env.example` 为 `.env`。不要提交包含本机配置或密钥的 `.env`。
+不要提交包含本机配置或密钥的 `.env`。启动、健康检查、浏览聊天页和读取历史都不会加载 Embedding 或调用远端 LLM；提交实际问题时才会按既有 Phase 2 边界把当前问题和完成回答所需的最小证据发送给配置的 LLM endpoint。任何新的自动化真实远端验收仍必须另行确认模型、endpoint、次数、token、费用和允许外发范围，v0.5.0 开发与验收没有发起新远端调用。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)，Phase 2 最终装配证据见 [v0.4.6 生产端到端收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)，Phase 2 最终装配证据见 [v0.4.6 生产端到端收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)，v0.5.0 的产品化证据见 [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -136,7 +158,22 @@ Invoke-RestMethod `
     -Body $body
 ```
 
-面试复盘在同一接口增加 `interview_record` 字段。有限多轮只接受一个可选 `previous_question`：只有当前问题包含“它、这个、上述、前面”等显式指代，且当前轮与上一轮明确 namespace 不冲突时，才用于本轮路由和检索；当前轮明确切换到 projects 或 resume 时以当前轮为准。服务不保存上一轮正文，不继承上一轮回答或引用，当前回答仍只能引用本轮重新检索得到的 `[S数字]`。缺少 LLM 密钥、数据源目录、索引或模型配置时，`/ask` 返回 503，但 `/health` 不会触发模型下载或远程调用，仍可用于确认进程存活。
+面试复盘在同一接口增加 `interview_record` 字段。有限多轮只接受一个可选 `previous_question`：只有当前问题包含“它、这个、上述、前面”等显式指代，且当前轮与上一轮明确 namespace 不冲突时，才用于本轮路由和检索；当前轮明确切换到 projects 或 resume 时以当前轮为准。聊天历史可以为界面恢复保存每轮当前问题和已校验回答，但 Agent 不加载整段历史，不继承旧回答或旧引用，当前回答仍只能引用本轮重新检索得到的 `[S数字]`。缺少 LLM 密钥、数据源目录、索引或模型配置时，`/ask` 返回 503，但 `/health` 不会触发模型下载或远程调用，仍可用于确认进程存活。
+
+## 本地会话历史
+
+历史默认写入 `DATABASE_PATH` 指定的 SQLite（默认 `data/interview_agent.db`），与文档索引状态和无正文审计共用文件、分表管理。正文表只保存当前问题、已校验回答、状态、稳定错误、置信提示、建议追问和展示用相对引用；不保存检索证据正文、完整 Vault、提示词、密钥、供应方错误正文、`interview_record`、`previous_question`、内部 chunk/document ID 或指纹。
+
+默认生命周期是 30 天、最多 100 个会话、每会话最近 100 轮；可通过以下未提交配置调整：
+
+```dotenv
+SESSION_HISTORY_ENABLED=true
+SESSION_HISTORY_RETENTION_DAYS=30
+SESSION_HISTORY_MAX_SESSIONS=100
+SESSION_HISTORY_MAX_TURNS_PER_SESSION=100
+```
+
+界面侧边栏可删除单个会话，“数据与隐私”旁的“清空历史”可删除全部聊天正文。对应本地接口是 `DELETE /api/history/{session_id}` 和 `DELETE /api/history`。删除会话会级联移除正文与展示引用，但不删除 Phase 2 既有的不含正文审计摘要；如需彻底重置全部本机运行记录，应先停止服务，再同时删除 `DATABASE_PATH` 对应 SQLite 和 `VECTOR_STORE_PATH`，模型缓存与 `logs/` 可按需删除。`.run/` 在正常停止后应为空。真实 Markdown/Vault 永远不属于该清理范围。
 
 ## Markdown 只读加载、增量向量索引与检索
 
@@ -179,7 +216,7 @@ Phase 1D 对 Chroma 和 FAISS 做了同机最小验证。两者都能在当前 W
 
 Phase 1E 使用 FastEmbed 在本机运行 `BAAI/bge-small-zh-v1.5`。首次实际生成向量时会下载约 90MB 的公开模型文件到 `EMBEDDING_CACHE_DIRECTORY`，不会上传 Vault 内容；缓存完整后可将 `EMBEDDING_LOCAL_FILES_ONLY=true`，强制只使用本地文件。查询会自动增加该模型针对“短问题检索长文档”推荐的中文指令，文档片段保持原文。
 
-当前阶段提供 Python 内部 Tool，不新增 HTTP 接口。调用方显式传入配置，加载器会规范化源目录和每个文件的真实路径，只递归读取 `.md` 文件，并按相对路径稳定返回：
+检索 Tool 继续只作为 Python 内部边界，不开放任意检索 HTTP 接口。v0.5.0 新增的 HTTP 只覆盖聊天提交和本地历史生命周期；调用方不能指定 Tool、namespace 或路径。以下内部示例中，加载器会规范化源目录和每个文件的真实路径，只递归读取 `.md` 文件，并按相对路径稳定返回：
 
 ```python
 from interview_agent.core.config import get_settings
@@ -351,7 +388,7 @@ Phase 1J 增加应用层和 HTTP 闭环。`AskInterviewAgentUseCase` 为每次�
 
 实际 `/ask` 流程为：校验 HTTP 数据 → 应用层建立会话和追踪 → Router 选择零个或一个 Tool → 本地 Embedding/Chroma 检索 → RAG 证据校验与限长 → 一次 LLM 调用 → 回答/引用校验 → SQLite 安全摘要 → HTTP 响应。高置信提示只表示本次回答实际引用了至少两个不同来源文件，不是模型正确率；复盘没有外部证据评分，因此标记为 `not_applicable`。
 
-SQLite 只保存数据源命名空间、相对路径、指纹、标题路径、行号和向量配置，不保存 Markdown 正文及本机绝对路径。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
+SQLite 的索引与审计表只保存数据源命名空间、相对路径、指纹、标题路径、行号、向量配置和无正文追踪摘要，不保存 Markdown 正文及本机绝对路径。v0.5.0 的聊天正文位于单独 `chat_sessions` / `chat_turns` 表，并受上文生命周期与删除策略约束。Chroma 在本地保存片段正文、向量和检索元数据，默认目录 `vector_index/` 已被 Git 忽略。`ChromaVectorStore` 应通过 `with` 使用或显式调用 `close()`，这样 Windows 才能及时释放持久化文件。
 
 Phase 2 固定集不再假设三个 namespace 共享同一分数分布。`notes=0.58` 保留 Phase 1 基线；`projects=0.535` 位于关键正例 `0.537974` 与未被事实策略覆盖的最近负例 `0.529941` 之间；`resume=0.56` 让最低关键正例 `0.561703` 进入候选。代价矩阵同时证明单靠这些较低阈值会在 projects/resume 产生 4/3 个误接受，因此它们只能与 namespace 检索前停止和事实锚点门控共同使用，不能单独视为安全校准。
 
@@ -375,13 +412,21 @@ v0.4.6 默认离线测试为 **295 passed、4 skipped**；新增跳过项是显�
 
 - Router 使用可解释的固定关键词，不处理复杂多意图或开放式规划；
 - 一次请求最多使用一个只读 Tool；无可靠证据时停止，不自动扩大检索链；
-- 多轮只支持调用方显式提供一条上一轮用户问题，不持久化正文，也不支持自动长会话摘要；
+- Agent 多轮只支持调用方显式提供一条上一轮用户问题；界面可持久化正文用于恢复，但不会把整段历史、旧回答或旧引用送回 Agent，也不支持自动长会话摘要；
 - 本地共享运行时按单用户模型串行执行，第一次 `/ask` 还会同步索引；
 - 常见个人信息脱敏不是完整 DLP，不覆盖护照、银行卡或任意自由文本隐私；
 - LLM 输出没有完整的语义 DLP；在当前单机单用户、资料由本人维护的边界下暂缓，若改为多人、公网或不可信资料输入必须重新评估；
 - 引用校验能证明来源确实来自本次检索，但不能自动证明每句话都被证据语义蕴含；
 - 事实锚点门控只覆盖明确技术标识、引号实体、常见组织名称和属性对，不等同于开放域事实蕴含模型；
 - 真实 LLM 的单轮合成边界已通过；供应方可用性、价格和模型行为仍可能变化，真实资料外发范围仍需单独确认。
+
+## Phase 3 v0.5.0 本地可用性验收
+
+v0.5.0 默认离线套件为 **327 passed、4 skipped**，较 v0.4.6 新增 32 个通过项且没有新增 skip。新增覆盖聊天页及同源安全头、受控历史 CRUD、保留期与数量清理、禁用不落正文、绝对引用拒绝、历史错误脱敏、preflight 失败归因、真实 PID 记录和令牌停止协议。JavaScript 语法、Python `compileall`、PowerShell AST 解析、`pip check` 和 `git diff --check` 均通过。
+
+Windows 实机演示先后暴露并修复了虚拟环境启动器 PID 与真实服务 PID 不一致、虚拟环境路径与操作系统进程映像路径不一致，以及优雅退出后 PID 文件重复删除三项问题。最终 `start.ps1 -NoBrowser` 通过当前本地配置的只读 preflight，`/health` 返回 `ok`；`stop.ps1` 触发 Uvicorn application shutdown 后 PID 文件不存在、8000 端口不监听。演示只扫描本地 Markdown，不发起提问、不加载 Embedding、不建立索引、不调用远端 LLM。
+
+Phase 2 的旧生产装配夹具显式关闭 v0.5 正文历史后，继续证明审计 SQLite 不含问题或源正文；v0.5 独立夹具同时证明默认历史只保存受控字段并可删除。检索、Router、RAG、LLM 提示和引用校验文件均未修改，冻结阈值仍是 notes `0.58`、projects `0.535`、resume `0.56`。
 
 ## 项目文档
 
@@ -396,3 +441,4 @@ v0.4.6 默认离线测试为 **295 passed、4 skipped**；新增跳过项是显�
 - [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)：记录 namespace 状态优先级修复、匿名多轮矩阵、引用边界和零回归证据。
 - [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)：记录用户首次运行前冻结的真实问题集、双 split 指标和隐私边界。
 - [v0.4.6 Phase 2 收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)：记录生产装配端到端、发送前白名单和最终阶段边界。
+- [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)：记录聊天界面、受控历史、preflight、一键启停、失败归因和 Phase 2 零退化证据。

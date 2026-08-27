@@ -7,7 +7,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from interview_agent.agent import AgentRequest, AgentStatus
-from interview_agent.application import ApplicationUnavailableError, AskService
+from interview_agent.application import (
+    ApplicationUnavailableError,
+    AskService,
+    ConversationHistoryService,
+)
 
 router = APIRouter()
 
@@ -57,6 +61,7 @@ class AskApiResponse(BaseModel):
     follow_up_questions: tuple[str, ...]
     tool_call_ids: tuple[str, ...]
     llm_request_id: str | None
+    history_status: str
     error: AgentErrorApiResponse | None
 
 
@@ -77,13 +82,17 @@ def post_ask(
 ) -> JSONResponse:
     """把 HTTP 数据交给应用用例，并映射稳定状态码。"""
     service: AskService = request.app.state.ask_service
+    history_service: ConversationHistoryService = (
+        request.app.state.history_service
+    )
+    agent_request = AgentRequest(
+        question=payload.question,
+        interview_record=payload.interview_record,
+        previous_question=payload.previous_question,
+    )
     try:
         result = service.execute(
-            AgentRequest(
-                question=payload.question,
-                interview_record=payload.interview_record,
-                previous_question=payload.previous_question,
-            ),
+            agent_request,
             session_id=payload.session_id,
         )
     except ApplicationUnavailableError:
@@ -98,6 +107,11 @@ def post_ask(
         )
 
     response = result.response
+    try:
+        history_status = history_service.record(agent_request, result)
+    except Exception:
+        # 回答可能已经产生远端费用；历史异常只能提示，不能诱导自动重试。
+        history_status = "failed"
     body = AskApiResponse(
         session_id=result.session_id,
         trace_id=response.trace_id,
@@ -125,6 +139,7 @@ def post_ask(
         follow_up_questions=response.follow_up_questions,
         tool_call_ids=response.tool_call_ids,
         llm_request_id=response.llm_request_id,
+        history_status=history_status,
         error=(
             AgentErrorApiResponse(
                 code=response.error.code,
