@@ -12,6 +12,7 @@ from interview_agent.application import (
     AskService,
     ConversationHistoryService,
 )
+from interview_agent.application.public_errors import public_error_fields
 
 router = APIRouter()
 
@@ -107,6 +108,10 @@ def post_ask(
         )
 
     response = result.response
+    public_error_code, public_error_message = public_error_fields(
+        response.error,
+        response.status,
+    )
     try:
         history_status = history_service.record(agent_request, result)
     except Exception:
@@ -142,21 +147,25 @@ def post_ask(
         history_status=history_status,
         error=(
             AgentErrorApiResponse(
-                code=response.error.code,
-                message=response.error.message,
-                retryable=response.error.retryable,
+                code=public_error_code or "agent_error",
+                message=public_error_message
+                or "The Agent could not complete the request.",
+                retryable=response.error.retryable is True,
             )
             if response.error is not None
             else None
         ),
     )
     return JSONResponse(
-        status_code=_http_status(response.status, response.error),
+        status_code=_http_status(
+            response.status,
+            response.error is not None and response.error.retryable is True,
+        ),
         content=body.model_dump(mode="json"),
     )
 
 
-def _http_status(status: AgentStatus, error: object) -> int:
+def _http_status(status: AgentStatus, retryable: bool) -> int:
     """把领域状态稳定映射为本地 HTTP 状态，不检查错误正文。"""
     if status in {
         AgentStatus.SUCCESS,
@@ -167,7 +176,7 @@ def _http_status(status: AgentStatus, error: object) -> int:
     if status in {AgentStatus.INVALID_INPUT, AgentStatus.UNSUPPORTED}:
         return 422
     if status is AgentStatus.TOOL_ERROR or status is AgentStatus.LLM_ERROR:
-        return 503 if getattr(error, "retryable", False) else 502
+        return 503 if retryable else 502
     if status is AgentStatus.INVALID_OUTPUT:
         return 502
     return 500

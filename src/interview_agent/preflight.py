@@ -18,6 +18,10 @@ from interview_agent.application.runtime import (
 from interview_agent.core.config import Settings
 
 
+_KNOWN_TRUNCATING_OUTPUT_TOKEN_LIMIT = 256
+_RECOMMENDED_OUTPUT_TOKEN_LIMIT = 1_200
+
+
 class CheckStatus(StrEnum):
     """启动检查的三个稳定结果级别。"""
 
@@ -83,6 +87,14 @@ def run_preflight(
                 message="LLM_API_KEY 已配置；检查过程不会使用或显示它。",
             )
         )
+
+    checks.append(_llm_output_budget_check(settings.llm_max_tokens))
+    checks.append(
+        _runtime_profile_check(
+            settings.database_path,
+            settings.vector_store_path,
+        )
+    )
 
     source_paths: tuple[Path, Path, Path] | None = None
     try:
@@ -196,6 +208,70 @@ def run_preflight(
                 )
             )
     return tuple(checks)
+
+
+def _llm_output_budget_check(max_tokens: int) -> PreflightCheck:
+    """拒绝已经用真实问题证明会截断的验收输出预算。"""
+    if max_tokens <= _KNOWN_TRUNCATING_OUTPUT_TOKEN_LIMIT:
+        return PreflightCheck(
+            code="llm_output_budget",
+            status=CheckStatus.FAIL,
+            message=(
+                f"LLM_MAX_TOKENS={max_tokens} 属于验收级小预算，"
+                "日常回答可能在完成前被截断。"
+            ),
+            action=(
+                "请在未提交的 .env 中设置 LLM_MAX_TOKENS=1200；"
+                "这只是上限，不会强制消耗全部 token。"
+            ),
+        )
+    if max_tokens < _RECOMMENDED_OUTPUT_TOKEN_LIMIT:
+        return PreflightCheck(
+            code="llm_output_budget",
+            status=CheckStatus.WARNING,
+            message=(
+                f"LLM_MAX_TOKENS={max_tokens} 低于当前产品推荐值 1200，"
+                "较长回答仍可能截断。"
+            ),
+            action="如出现 finish_reason=length，请改为 1200 后重启。",
+        )
+    return PreflightCheck(
+        code="llm_output_budget",
+        status=CheckStatus.PASS,
+        message=f"LLM 输出上限为 {max_tokens} token，满足当前产品基线。",
+    )
+
+
+def _runtime_profile_check(
+    database_path: Path,
+    vector_store_path: Path,
+) -> PreflightCheck:
+    """识别验收命名的运行时路径，避免测试状态被误作日常历史。"""
+    paths = (database_path, vector_store_path)
+    if any(_looks_like_acceptance_path(path) for path in paths):
+        return PreflightCheck(
+            code="runtime_profile",
+            status=CheckStatus.WARNING,
+            message="SQLite 或向量目录仍使用验收命名，日常历史会与验收状态混在一起。",
+            action=(
+                "建议分别设置 DATABASE_PATH=data/interview_agent.db 和 "
+                "VECTOR_STORE_PATH=vector_index；应用不会自动移动或删除旧数据。"
+            ),
+        )
+    return PreflightCheck(
+        code="runtime_profile",
+        status=CheckStatus.PASS,
+        message="运行时路径使用日常产品配置，不带验收目录标记。",
+    )
+
+
+def _looks_like_acceptance_path(path: Path) -> bool:
+    """只检查路径分段名称，不解析内容或创建目录。"""
+    return any(
+        part.casefold() == "acceptance"
+        or part.casefold().startswith("acceptance-")
+        for part in path.parts
+    )
 
 
 def _directory_has_content(path: Path) -> bool:

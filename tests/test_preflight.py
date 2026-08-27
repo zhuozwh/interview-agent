@@ -83,6 +83,61 @@ def test_preflight_reports_missing_key_without_exposing_values(
     assert "test-only-key" not in repr(checks)
 
 
+def test_preflight_rejects_known_truncating_llm_output_budget(
+    temporary_directory: Path,
+) -> None:
+    """已在真实口述问题中触发截断的 256 token 配置不得继续绿灯。"""
+    settings = _settings(temporary_directory, llm_max_tokens=256)
+    check = _by_code(run_preflight(settings, check_port=False))[
+        "llm_output_budget"
+    ]
+
+    assert check.status is CheckStatus.FAIL
+    assert "256" in check.message
+    assert check.action is not None
+    assert "1200" in check.action
+
+
+def test_preflight_classifies_output_budget_boundaries(
+    temporary_directory: Path,
+) -> None:
+    """257–1199 只提醒，产品基线 1200 必须稳定通过。"""
+    expected = (
+        (257, CheckStatus.WARNING),
+        (1_199, CheckStatus.WARNING),
+        (1_200, CheckStatus.PASS),
+    )
+    for max_tokens, status in expected:
+        settings = _settings(
+            temporary_directory,
+            llm_max_tokens=max_tokens,
+        )
+        check = _by_code(run_preflight(settings, check_port=False))[
+            "llm_output_budget"
+        ]
+        assert check.status is status
+
+
+def test_preflight_warns_when_product_uses_acceptance_runtime_paths(
+    temporary_directory: Path,
+) -> None:
+    """验收 SQLite/Chroma 混入日常运行时应明确提醒，但不删除旧数据。"""
+    acceptance_root = temporary_directory / "acceptance-v0.3.1-baseline"
+    settings = _settings(
+        temporary_directory,
+        database_path=acceptance_root / "state.sqlite3",
+        vector_store_path=acceptance_root / "vectors",
+    )
+    check = _by_code(run_preflight(settings, check_port=False))[
+        "runtime_profile"
+    ]
+
+    assert check.status is CheckStatus.WARNING
+    assert "验收" in check.message
+    assert check.action is not None
+    assert "不会自动移动或删除" in check.action
+
+
 def test_preflight_rejects_runtime_path_inside_read_only_source(
     temporary_directory: Path,
 ) -> None:

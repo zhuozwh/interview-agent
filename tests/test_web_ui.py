@@ -39,18 +39,56 @@ def test_chat_assets_load_without_external_dependencies_or_unsafe_html() -> None
     """静态资源随 Python 包提供，界面渲染正文不使用 innerHTML。"""
     application = create_app(Settings(_env_file=None))
     css = asyncio.run(_get(application, "/assets/app.css"))
+    formatter = asyncio.run(_get(application, "/assets/safe_format.js"))
     javascript = asyncio.run(_get(application, "/assets/app.js"))
 
     assert css.status_code == 200
+    assert formatter.status_code == 200
     assert javascript.status_code == 200
     assert "text/css" in css.headers["content-type"]
+    assert "javascript" in formatter.headers["content-type"]
     assert "javascript" in javascript.headers["content-type"]
     assert "https://" not in css.text
     assert "http://" not in css.text
-    assert "innerHTML" not in javascript.text
+    combined_scripts = formatter.text + javascript.text
+    assert "innerHTML" not in combined_scripts
+    assert "outerHTML" not in combined_scripts
+    assert "insertAdjacentHTML" not in combined_scripts
     assert "textContent" in javascript.text
-    assert "localStorage" not in javascript.text
-    assert "sessionStorage" not in javascript.text
+    assert "javascript:" not in formatter.text
+    assert "localStorage" not in combined_scripts
+    assert "sessionStorage" not in combined_scripts
+
+
+def test_chat_ui_exposes_evidence_strength_and_actionable_single_errors() -> None:
+    """中等证据不能再隐身，模型错误只在消息内给出中文动作。"""
+    application = create_app(Settings(_env_file=None))
+    javascript = asyncio.run(_get(application, "/assets/app.js"))
+
+    assert "证据匹配：中，请核对引用" in javascript.text
+    assert "证据匹配：低，仅作参考" in javascript.text
+    assert "表示本轮检索证据强度，不是模型正确率" in javascript.text
+    assert "回答没有完整生成" in javascript.text
+    assert "手动重试会重新检索" in javascript.text
+    assert "可能产生一次远端模型调用和费用" in javascript.text
+    assert "setNotice(body.error.message)" not in javascript.text
+    assert "error_retryable" in javascript.text
+
+
+def test_chat_manual_retry_is_explicit_single_request_in_same_session() -> None:
+    """重试必须经确认，只走一个提交入口，且不把失败问题变成追问上下文。"""
+    application = create_app(Settings(_env_file=None))
+    javascript = asyncio.run(_get(application, "/assets/app.js"))
+
+    assert javascript.text.count('fetch("/ask"') == 1
+    assert "window.confirm" in javascript.text
+    assert "state.manualRetryQuestion !== question" in javascript.text
+    assert "payload.session_id = state.sessionId" in javascript.text
+    assert "payload.previous_question = previousQuestion" in javascript.text
+    assert "setTimeout" not in javascript.text
+    assert "invalid_llm_response" in javascript.text
+    assert '"pending"' in javascript.text
+    assert "NON_FAILURE_STATUSES" in javascript.text
 
 
 def test_health_remains_lightweight_after_web_ui_is_added(tmp_path) -> None:

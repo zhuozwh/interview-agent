@@ -6,7 +6,23 @@ const state = {
   turns: [],
   sending: false,
   historyInfo: null,
+  manualRetryQuestion: null,
 };
+
+const NON_FAILURE_STATUSES = new Set([
+  "pending",
+  "success",
+  "no_evidence",
+  "policy_refused",
+]);
+const RETRYABLE_ERROR_CODES = new Set([
+  "incomplete_llm_output",
+  "llm_connection_failed",
+  "llm_invalid_response",
+  "llm_rate_limited",
+  "llm_service_unavailable",
+  "llm_timeout",
+]);
 
 const elements = {
   sidebar: document.querySelector("#sidebar"),
@@ -76,7 +92,7 @@ function renderConversation() {
   elements.messageList.replaceChildren();
   for (const turn of state.turns) {
     elements.messageList.append(createMessage("user", turn.question, turn.created_at));
-    const assistantText = turn.answer || turn.error_message || statusMessage(turn.status);
+    const assistantText = turn.answer || userFacingError(turn);
     elements.messageList.append(
       createMessage("assistant", assistantText, turn.created_at, turn),
     );
@@ -102,13 +118,26 @@ function createMessage(role, text, createdAt, turn = null) {
   time.textContent = formatTime(createdAt || new Date().toISOString());
   meta.append(author, time);
 
-  const body = document.createElement("p");
+  const body = document.createElement("div");
   body.className = "answer-text";
-  body.textContent = text || "没有可显示的内容。";
-  if (turn && turn.status && !["success", "no_evidence", "policy_refused"].includes(turn.status)) {
+  const failed = Boolean(turn?.status && !NON_FAILURE_STATUSES.has(turn.status));
+  if (role === "assistant" && !failed) {
+    appendSafeFormattedAnswer(body, text || "没有可显示的内容。");
+  } else {
+    body.textContent = text || "没有可显示的内容。";
+  }
+  if (failed) {
     body.classList.add("error");
   }
   content.append(meta, body);
+
+  if (turn?.confidence && turn.confidence !== "not_applicable") {
+    content.append(createConfidenceBadge(turn.confidence));
+  }
+
+  if (failed) {
+    content.append(createErrorActions(turn));
+  }
 
   if (turn && Array.isArray(turn.citations) && turn.citations.length) {
     const citations = document.createElement("div");
@@ -142,6 +171,130 @@ function createMessage(role, text, createdAt, turn = null) {
   return article;
 }
 
+function appendSafeFormattedAnswer(container, text) {
+  const formatter = window.InterviewAgentSafeFormat;
+  if (!formatter || typeof formatter.parseBlocks !== "function") {
+    container.textContent = text;
+    return;
+  }
+  const blocks = formatter.parseBlocks(text);
+  if (!blocks.length) {
+    container.textContent = "没有可显示的内容。";
+    return;
+  }
+  for (const block of blocks) {
+    if (block.type === "ordered-list" || block.type === "unordered-list") {
+      const list = document.createElement(block.type === "ordered-list" ? "ol" : "ul");
+      for (const item of block.items) {
+        const listItem = document.createElement("li");
+        appendInlineTokens(listItem, item);
+        list.append(listItem);
+      }
+      container.append(list);
+      continue;
+    }
+    const paragraph = document.createElement("p");
+    appendInlineTokens(paragraph, block.tokens || []);
+    container.append(paragraph);
+  }
+}
+
+function appendInlineTokens(container, tokens) {
+  for (const token of tokens) {
+    if (token.type === "strong") {
+      const strong = document.createElement("strong");
+      strong.textContent = token.value;
+      container.append(strong);
+    } else if (token.type === "code") {
+      const code = document.createElement("code");
+      code.textContent = token.value;
+      container.append(code);
+    } else {
+      container.append(document.createTextNode(token.value));
+    }
+  }
+}
+
+function createConfidenceBadge(confidence) {
+  const labels = {
+    high: "证据匹配：高",
+    medium: "证据匹配：中，请核对引用",
+    low: "证据匹配：低，仅作参考",
+  };
+  const badge = document.createElement("span");
+  badge.className = `confidence-badge confidence-${confidence}`;
+  badge.textContent = labels[confidence] || "证据匹配：未知";
+  badge.title = "表示本轮检索证据强度，不是模型正确率；仍应核对引用内容。";
+  return badge;
+}
+
+function createErrorActions(turn) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "error-actions";
+  if (isRetryableTurn(turn)) {
+    const retry = document.createElement("button");
+    retry.className = "retry-button";
+    retry.type = "button";
+    retry.textContent = "手动重试";
+    retry.title = "重新检索并再次调用回答模型，可能产生一次费用";
+    retry.addEventListener("click", () => requestManualRetry(turn));
+    wrapper.append(retry);
+  }
+
+  const details = document.createElement("details");
+  details.className = "error-details";
+  const summary = document.createElement("summary");
+  summary.textContent = "诊断信息";
+  const diagnostics = document.createElement("p");
+  const fields = [];
+  if (turn.error_code) {
+    fields.push(`错误码：${turn.error_code}`);
+  }
+  if (turn.trace_id) {
+    fields.push(`追踪标识：${turn.trace_id}`);
+  }
+  diagnostics.textContent = fields.join("\n") || "没有可显示的诊断信息。";
+  details.append(summary, diagnostics);
+  wrapper.append(details);
+  return wrapper;
+}
+
+function isRetryableTurn(turn) {
+  return turn.error_retryable === true || RETRYABLE_ERROR_CODES.has(turn.error_code);
+}
+
+function requestManualRetry(turn) {
+  if (state.sending || !turn?.question) {
+    return;
+  }
+  const confirmed = window.confirm(
+    "手动重试会重新检索，并可能产生一次远端模型调用和费用。是否继续？",
+  );
+  if (!confirmed) {
+    return;
+  }
+  state.manualRetryQuestion = turn.question;
+  fillPrompt(turn.question);
+  elements.composer.requestSubmit();
+}
+
+function userFacingError(turn) {
+  const messages = {
+    incomplete_llm_output: "回答没有完整生成，系统未展示可能被截断的内容。请检查 LLM_MAX_TOKENS，或稍后手动重试。",
+    llm_connection_failed: "无法连接回答模型。请检查网络、endpoint，并确认服务不是从受限环境启动。",
+    llm_timeout: "回答模型超时；请求可能已被供应方接受，系统不会自动重复调用。",
+    llm_authentication_failed: "回答模型拒绝了当前密钥或权限。请检查本机 .env 后重启。",
+    llm_rate_limited: "回答模型当前限流。请稍后手动重试，不要连续提交。",
+    llm_request_rejected: "回答模型拒绝了请求。请检查模型名称、endpoint 和兼容参数。",
+    llm_service_unavailable: "回答模型服务暂时不可用。请稍后手动重试。",
+    llm_invalid_response: "回答模型返回了无法安全解析的结果，本轮没有展示。",
+    invalid_llm_response: "回答模型输出不符合本地安全合约，本轮没有展示。",
+    service_unavailable: "本地运行时尚未准备好。请查看启动窗口中的检查结果并重启。",
+    local_request_failed: "无法完成本地请求。请确认服务仍在运行后刷新页面。",
+  };
+  return messages[turn?.error_code] || statusMessage(turn?.status);
+}
+
 function statusMessage(status) {
   const messages = {
     no_evidence: "当前资料不足，无法给出有依据的回答。",
@@ -150,7 +303,7 @@ function statusMessage(status) {
     unsupported: "当前版本暂不支持这个请求。",
     tool_error: "本地检索暂时失败。",
     llm_error: "回答服务暂时失败。",
-    invalid_output: "模型输出未通过引用或安全校验。",
+    invalid_output: "模型输出未通过引用、完整性或安全校验，本轮没有展示不可信内容。",
     internal_error: "应用内部处理失败，请根据追踪标识排查。",
   };
   return messages[status] || "请求没有返回可显示的回答。";
@@ -324,8 +477,10 @@ async function submitQuestion(event) {
     return;
   }
   const previousQuestion = state.turns.length
+    && state.manualRetryQuestion !== question
     ? state.turns[state.turns.length - 1].question
     : null;
+  state.manualRetryQuestion = null;
   const optimisticTime = new Date().toISOString();
   const optimistic = {
     question,
@@ -362,7 +517,9 @@ async function submitQuestion(event) {
     });
     const body = await response.json();
     if (body.detail) {
-      throw new Error(body.detail);
+      const serviceError = new Error(body.detail);
+      serviceError.code = "service_unavailable";
+      throw serviceError;
     }
     state.sessionId = body.session_id || state.sessionId;
     state.turns[state.turns.length - 1] = {
@@ -374,6 +531,7 @@ async function submitQuestion(event) {
       intent: body.intent,
       error_code: body.error?.code || null,
       error_message: body.error?.message || null,
+      error_retryable: body.error?.retryable === true,
       confidence: body.confidence,
       citations: body.citations || [],
       follow_up_questions: body.follow_up_questions || [],
@@ -385,18 +543,17 @@ async function submitQuestion(event) {
     }
     renderConversation();
     await loadHistory();
-    if (!response.ok && body.error?.message) {
-      setNotice(body.error.message);
-    }
   } catch (error) {
     state.turns[state.turns.length - 1] = {
       ...optimistic,
       answer: null,
       status: "internal_error",
+      error_code: error.code || "local_request_failed",
       error_message: error.message || "请求失败，请检查本地服务状态。",
+      error_retryable: false,
     };
     renderConversation();
-    setNotice(error.message || "请求失败，请检查本地服务状态。");
+    setNotice("");
   } finally {
     setSending(false);
     elements.question.focus();

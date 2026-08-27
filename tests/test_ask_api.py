@@ -257,3 +257,77 @@ def test_api_does_not_expose_runtime_exception_details() -> None:
     assert response.status_code == 503
     assert "D:/private" not in body
     assert "secret-key-value" not in body
+
+
+def test_api_sanitizes_agent_error_code_and_message() -> None:
+    """恶意错误码和供应方正文不能穿透到本地 HTTP 客户端。"""
+    service = FakeAskService(
+        AgentResponse(
+            trace_id=_TRACE_ID,
+            status=AgentStatus.LLM_ERROR,
+            intent=None,
+            route_reason="answer_model_failed",
+            answer=None,
+            citations=(),
+            tool_call_ids=(),
+            llm_request_id=None,
+            error=AgentError(
+                code="LLM_ERROR\nD:/private",
+                message="D:/private/resume.md secret-key-value",
+                retryable=True,
+            ),
+        )
+    )
+    application = create_app(
+        Settings(_env_file=None),
+        ask_service=service,
+    )
+    response = asyncio.run(
+        _post(application, {"question": "触发恶意错误"})
+    )
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"] == {
+        "code": "agent_error",
+        "message": "The answer model could not complete the request.",
+        "retryable": True,
+    }
+    assert "D:/private" not in response.text
+    assert "secret-key-value" not in response.text
+
+
+def test_api_rejects_non_string_error_code_and_truthy_retry_flag() -> None:
+    """宽松 dataclass 被误用时，类型异常也不能扩大公开错误行为。"""
+    service = FakeAskService(
+        AgentResponse(
+            trace_id=_TRACE_ID,
+            status=AgentStatus.LLM_ERROR,
+            intent=None,
+            route_reason="answer_model_failed",
+            answer=None,
+            citations=(),
+            tool_call_ids=(),
+            llm_request_id=None,
+            error=AgentError(
+                code=123,  # type: ignore[arg-type]
+                message="secret-key-value",
+                retryable="yes",  # type: ignore[arg-type]
+            ),
+        )
+    )
+    application = create_app(
+        Settings(_env_file=None),
+        ask_service=service,
+    )
+    response = asyncio.run(
+        _post(application, {"question": "触发类型异常"})
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == {
+        "code": "agent_error",
+        "message": "The answer model could not complete the request.",
+        "retryable": False,
+    }
+    assert "secret-key-value" not in response.text

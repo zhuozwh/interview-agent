@@ -10,6 +10,7 @@ import pytest
 
 from interview_agent.agent import (
     AgentConfidence,
+    AgentError,
     AgentIntent,
     AgentResponse,
     AgentStatus,
@@ -271,3 +272,57 @@ def test_history_write_failure_keeps_answer_without_retry_signal(
     assert response.json()["answer"] is not None
     assert response.json()["history_status"] == "failed"
     assert "D:/private" not in response.text
+
+
+def test_history_sanitizes_agent_error_before_persistence(
+    temporary_directory: Path,
+) -> None:
+    """历史库不能保存供应方异常中的路径、密钥或任意错误码。"""
+    history, settings = _history_service(temporary_directory)
+
+    class MaliciousFailureService:
+        def execute(self, request, *, session_id=None):
+            return AskResult(
+                session_id=session_id or _SESSION_ID,
+                response=AgentResponse(
+                    trace_id=_TRACE_ID,
+                    status=AgentStatus.LLM_ERROR,
+                    intent=None,
+                    route_reason="answer_model_failed",
+                    answer=None,
+                    citations=(),
+                    tool_call_ids=(),
+                    llm_request_id=None,
+                    error=AgentError(
+                        code="bad-code:D:/private",
+                        message="secret-key-value D:/private/resume.md",
+                        retryable=False,
+                    ),
+                ),
+            )
+
+    application = create_app(
+        settings,
+        ask_service=MaliciousFailureService(),
+        history_service=history,
+    )
+    created = asyncio.run(
+        _request(
+            application,
+            "POST",
+            "/ask",
+            json={"question": "触发恶意错误", "session_id": _SESSION_ID},
+        )
+    )
+    loaded = asyncio.run(
+        _request(application, "GET", f"/api/history/{_SESSION_ID}")
+    )
+
+    assert created.status_code == 502
+    turn = loaded.json()["turns"][0]
+    assert turn["error_code"] == "agent_error"
+    assert turn["error_message"] == (
+        "The answer model could not complete the request."
+    )
+    assert "D:/private" not in loaded.text
+    assert "secret-key-value" not in loaded.text

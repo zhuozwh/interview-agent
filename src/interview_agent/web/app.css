@@ -459,8 +459,97 @@ textarea:focus-visible {
   line-height: 1.75;
 }
 
+.answer-text p {
+  margin: 0 0 12px;
+}
+
+.answer-text p:last-child {
+  margin-bottom: 0;
+}
+
+.answer-text ol,
+.answer-text ul {
+  margin: 8px 0 14px;
+  padding-left: 1.45rem;
+  white-space: normal;
+}
+
+.answer-text li + li {
+  margin-top: 4px;
+}
+
+.answer-text code {
+  padding: 0.12em 0.36em;
+  border: 1px solid #dbe5dc;
+  border-radius: 5px;
+  color: #284c39;
+  background: #f2f6f1;
+  font-family: Consolas, "Cascadia Code", monospace;
+  font-size: 0.9em;
+}
+
 .answer-text.error {
   color: var(--danger);
+}
+
+.confidence-badge {
+  display: inline-flex;
+  margin-top: 11px;
+  padding: 5px 9px;
+  border: 1px solid #d7e3d9;
+  border-radius: 999px;
+  color: #496054;
+  background: #f6f9f5;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.confidence-medium {
+  border-color: #ead8ac;
+  color: #7b5a16;
+  background: #fff9e8;
+}
+
+.confidence-low {
+  border-color: #edc9bf;
+  color: #8a4030;
+  background: #fff3ef;
+}
+
+.error-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.retry-button {
+  padding: 7px 11px;
+  border: 1px solid #d2ddcf;
+  border-radius: 9px;
+  color: var(--green);
+  background: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.retry-button:hover {
+  background: var(--green-soft);
+}
+
+.error-details {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.error-details summary {
+  cursor: pointer;
+}
+
+.error-details p {
+  margin: 7px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .citation-list {

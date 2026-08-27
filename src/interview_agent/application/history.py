@@ -15,6 +15,7 @@ from interview_agent.application.history_models import (
     HistoryTurn,
 )
 from interview_agent.application.models import AskResult
+from interview_agent.application.public_errors import public_error_fields
 from interview_agent.application.runtime import (
     validate_local_storage_boundaries,
 )
@@ -97,6 +98,10 @@ class LocalConversationHistoryService:
         try:
             store = self._require_store()
             response = result.response
+            error_code, error_message = public_error_fields(
+                response.error,
+                response.status,
+            )
             store.record_turn(
                 HistoryTurn(
                     trace_id=response.trace_id,
@@ -110,16 +115,8 @@ class LocalConversationHistoryService:
                         if response.intent is not None
                         else None
                     ),
-                    error_code=(
-                        response.error.code
-                        if response.error is not None
-                        else None
-                    ),
-                    error_message=(
-                        response.error.message
-                        if response.error is not None
-                        else None
-                    ),
+                    error_code=error_code,
+                    error_message=error_message,
                     confidence=(
                         response.confidence.value
                         if response.confidence is not None
