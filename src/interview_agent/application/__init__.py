@@ -18,6 +18,18 @@ if TYPE_CHECKING:
         CitationEvidenceUnavailableError,
         LocalCitationEvidenceService,
     )
+    from interview_agent.application.external_search import (
+        ControlledExternalSearchService,
+        ExternalSearchCandidate,
+        ExternalSearchConfirmationError,
+        ExternalSearchPolicyRefusedError,
+        ExternalSearchPreview,
+        ExternalSearchProvider,
+        ExternalSearchResult,
+        ExternalSearchService,
+        ExternalSearchUnavailableError,
+        ExternalSource,
+    )
     from interview_agent.application.history import (
         ConversationHistoryInfo,
         ConversationHistoryService,
@@ -57,6 +69,24 @@ _EXPORT_MODULES = {
     ),
     "CitationEvidenceUnavailableError": "interview_agent.application.evidence",
     "LocalCitationEvidenceService": "interview_agent.application.evidence",
+    "ControlledExternalSearchService": (
+        "interview_agent.application.external_search"
+    ),
+    "ExternalSearchCandidate": "interview_agent.application.external_search",
+    "ExternalSearchConfirmationError": (
+        "interview_agent.application.external_search"
+    ),
+    "ExternalSearchPolicyRefusedError": (
+        "interview_agent.application.external_search"
+    ),
+    "ExternalSearchPreview": "interview_agent.application.external_search",
+    "ExternalSearchProvider": "interview_agent.application.external_search",
+    "ExternalSearchResult": "interview_agent.application.external_search",
+    "ExternalSearchService": "interview_agent.application.external_search",
+    "ExternalSearchUnavailableError": (
+        "interview_agent.application.external_search"
+    ),
+    "ExternalSource": "interview_agent.application.external_search",
     "ConversationHistoryInfo": "interview_agent.application.history",
     "ConversationHistoryService": "interview_agent.application.history",
     "ConversationHistoryUnavailableError": "interview_agent.application.history",

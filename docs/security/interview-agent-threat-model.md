@@ -2,13 +2,14 @@
 
 ## Executive summary
 
-最高风险集中在两个边界：本地敏感 Markdown 进入远端 LLM，以及本地单用户 FastAPI 被错误地扩展为网络服务。当前默认 loopback、固定单 Tool、来源白名单、提示词数据包络、引用校验、简历脱敏和无正文审计追踪显著降低了风险。v0.3.2 关闭了运行时写入路径与只读数据源重叠的配置缺口；v0.5.0 新增可删除、有限保留的本地聊天正文，因此 SQLite 也成为明确的敏感数据资产。没有 Critical/High 威胁；完整输出语义 DLP、认证、请求级网络防护和同账户本地明文读取在当前使用模型下是有条件的 Medium/Low 残余风险。
+最高风险集中在三个边界：本地敏感 Markdown 进入远端 LLM，本地单用户 FastAPI 被错误地扩展为网络服务，以及未来启用的外部搜索接收用户查询并返回不可信链接。当前默认 loopback、固定单 Tool、来源白名单、提示词数据包络、引用校验、简历脱敏和无正文审计追踪显著降低了风险。v0.3.2 关闭了运行时写入路径与只读数据源重叠的配置缺口；v0.5.0 新增可删除、有限保留的本地聊天正文，因此 SQLite 也成为明确的敏感数据资产；v0.5.4 只建立默认未配置提供方的外部证据协议，不产生真实搜索。没有 Critical/High 威胁；完整 DLP、认证、请求级网络防护、真实搜索供应方治理和同账户本地明文读取在当前使用模型下是有条件的 Medium/Low 残余风险。
 
 ## Scope and assumptions
 
 - 范围：`src/interview_agent/` 的运行时、API、Agent、Tool、Retrieval、LLM、SQLite、Chroma；测试、配置和发布边界。
 - 已由用户确认：Windows 本机、单用户自用、不对公网开放、无多租户、Vault 含敏感笔记/项目/简历。
 - 远程 LLM：产品运行时可选；本轮审查和验收不调用。未来每次真实验收仍需明确批准费用和外发范围。
+- 外部搜索：v0.5.4 默认未配置提供方，只用合成替身验证协议；真实 provider、endpoint、网络调用、抓取和外部内容合成均需新的用户批准和安全复审。
 - Embedding：本地 FastEmbed；首次可下载公开模型，真实资料正文不发送到 Embedding 远端服务。
 - 信任：当前 Markdown 由用户本人维护，但其正文仍按不可信提示输入处理。
 - 范围外：操作系统账户已被攻破、供应方内部安全、磁盘硬件攻击、多人权限系统、生产公网部署和 Phase 2 检索质量优化。
@@ -24,6 +25,7 @@
 - 数据源加载与索引：只读扫描三个互斥 Markdown 目录，切分、Embedding、增量写入 SQLite/Chroma；证据锚点：`src/interview_agent/retrieval/markdown.py:55-210`、`src/interview_agent/retrieval/vector_index.py`。
 - 本地存储：SQLite 的索引/审计表保存状态和无正文摘要，独立聊天表保存有限问题、已校验回答和展示引用；Chroma 保存证据正文、向量和相对引用元数据；证据锚点：`src/interview_agent/storage/*.py`。
 - 远端 LLM：通过 OpenAI-compatible HTTPS Chat Completions 接口发送一次有界请求；证据锚点：`src/interview_agent/llm/openai_compatible.py`。
+- 外部证据：本地服务先过滤并预览自包含的普通知识查询，提供方存在且用户确认后最多搜索一次；结果以临时 `[W]` 卡片显示，不进入 Agent 或存储；证据锚点：`src/interview_agent/application/external_search.py`、`src/interview_agent/api/external_search.py`。
 - 开发与验收：pytest 使用替身和临时目录；真实 Vault 验收强制本地 Embedding、拒绝 LLM、比较前后指纹；证据锚点：`src/interview_agent/acceptance/real_vault.py`、`tests/test_real_vault_acceptance.py`。
 
 ### Data flows and trust boundaries
@@ -36,6 +38,8 @@
 - Agent -> SQLite Trace：只写 trace/session/tool/LLM ID、状态、耗时、长度和引用 ID；不写问题、记录、证据或回答正文。
 - API -> SQLite History：默认保存当前问题、已校验回答、稳定状态和展示引用；不保存证据正文、完整 Vault、提示词、密钥、`interview_record`、`previous_question` 或内部片段标识，并受时间/数量清理和显式删除约束。
 - Agent -> 本机用户：回答、相对引用和安全错误经 JSON 返回；输出校验阻止未知引用、外部链接和绝对路径，但不是完整语义 DLP。
+- 本机用户 -> 外部搜索提供方：只有普通知识查询经本地敏感数据、个人上下文和 namespace 策略通过，并在界面展示实际文本、取得确认后才可发送；不附带本地证据、会话历史、项目、简历或面试记录。v0.5.4 默认没有该网络边。
+- 外部搜索提供方 -> 本机用户：标题、摘要、公共 HTTPS URL 和提供方自报类型经数量、文本、域名、端口、凭据与敏感参数过滤后，用纯文本临时展示；不进入 SQLite、`/ask` 或 LLM，来源类型不等于事实核验。
 - Stop script -> FastAPI：Git 忽略 PID 文件中的随机令牌经自定义请求头进入隐藏停止入口；PID、进程映像和启动时间匹配后才发起，错误令牌统一返回 404。
 
 #### Diagram
@@ -69,6 +73,7 @@ flowchart LR
 | 引用与回答 | 影响个人经历真实性和面试准备质量 | I |
 | Embedding 模型和依赖 | 被替换会影响检索完整性或执行本地恶意代码 | I/A |
 | 本机算力和远端调用预算 | 滥用会造成卡死、延迟或费用 | A |
+| 外部搜索查询、结果和点击目标 | 查询可能含隐私；结果可能误导、跟踪或引向恶意页面 | C/I/A |
 
 ## Attacker model
 
@@ -77,6 +82,7 @@ flowchart LR
 - 能构造 `/ask` 问题或面试记录；当前现实前提是本机用户本人，条件场景是服务被错误暴露后出现网络调用者。
 - 能在被索引的 Markdown 中放置提示注入、相似但错误的事实或隐私诱导文本；当前资料主要由用户本人维护。
 - 恶意或异常远端 LLM 可以返回畸形 JSON、伪造引用、链接、绝对路径或超大响应。
+- 未来真实外部搜索提供方可以记录查询，返回恶意/误导标题摘要、伪造来源类型或危险链接。
 - 拥有同一 Windows 账户文件权限的本地进程可以读取或篡改运行时文件和环境配置。
 - 依赖源、模型下载源或未来更新可能被供应链攻击。
 
@@ -95,6 +101,8 @@ flowchart LR
 | `POST /ask` | loopback HTTP JSON | 用户 -> FastAPI | 无认证；字段严格，长度在 Agent 层限制 | `src/interview_agent/api/ask.py:15-152` |
 | `GET/DELETE /api/history` | loopback HTTP JSON | 用户 -> History Store | 有限正文；同源 UI；逐会话/全部删除 | `src/interview_agent/api/history.py` |
 | `POST /api/system/shutdown` | loopback HTTP + 随机令牌 | Stop script -> Server | 不进 OpenAPI；错误令牌 404；回调仅设置 Uvicorn 退出标记 | `src/interview_agent/api/system.py` |
+| `POST /api/external-search/preview` | loopback HTTP JSON | 用户 -> Local policy | 本地预览；字段严格；不调用提供方；响应不缓存 | `src/interview_agent/api/external_search.py` |
+| `POST /api/external-search` | loopback HTTP JSON | 用户 -> Optional provider | 重新计算策略和确认文本；默认 503；配置后最多一次调用 | `src/interview_agent/api/external_search.py`、`application/external_search.py` |
 | `.env`/环境变量 | 进程启动 | 本机配置 -> Runtime | 包含密钥、路径、模型和阈值 | `src/interview_agent/core/config.py:11-272` |
 | Markdown 源目录 | 本地文件系统 | Vault -> Loader | 真实路径、白名单、大小和 UTF-8 校验 | `src/interview_agent/retrieval/markdown.py:55-210` |
 | 本地模型缓存 | FastEmbed 延迟加载 | 包下载/缓存 -> 进程 | 只接受 FastEmbed 支持模型 | `src/interview_agent/retrieval/fastembed_provider.py:44-140` |
@@ -116,6 +124,7 @@ flowchart LR
 7. 网络攻击者发送超大 JSON -> ASGI 先解析请求 -> Agent 长度校验发生较晚 -> 消耗内存；当前 loopback-only 使概率低。
 8. 同账户进程读取 SQLite -> 获得本地聊天问题和回答 -> 暴露用户学习/求职内容；当前依赖 Windows 账户权限、Git 忽略、有限保留和用户删除降低范围，但没有应用层加密。
 9. 同账户进程窃取 `.run` 停止令牌 -> 请求隐藏 shutdown 入口 -> 造成可恢复的本地服务中断；不会获得 Vault 或密钥，正常下次启动可恢复。
+10. 用户把个人上下文或凭据写入外部查询，或提供方返回追踪/恶意链接 -> 本地策略、显式确认、URL 过滤和纯文本分区降低风险；识别不是完整 DLP，真实提供方启用后仍可能保留安全查询，用户主动点击的公共 HTTPS 页面也离开本应用信任边界。
 
 ## Threat model table
 
@@ -130,12 +139,13 @@ flowchart LR
 | TM-007 | 网络或本机调用者 | 能向 API 发送请求 | 发送大请求或高频请求，占用串行运行时和 LLM预算 | 延迟、内存、费用 | 可用性、预算 | Agent 字符上限、一次 Tool/LLM、超时、有限重试、串行锁 | 请求体在解析前无字节上限；无速率限制 | 仅在共享/公网时由代理或中间件限制 body/rate/concurrency | 请求大小、429、队列时间和费用告警 | Low | Medium | low |
 | TM-008 | 同账户本地进程或备份读取者 | 可读取运行时 SQLite | 读取聊天问题、回答和展示引用 | 学习、求职和个人上下文披露 | 聊天历史 | Git 忽略；有限时间/数量；逐会话/全部删除；不保存证据正文、面试记录或密钥 | 无应用层加密；无独立目录 ACL | 共享设备关闭历史或使用系统磁盘加密；备份前清理；多人场景重新设计权限 | 历史配置与数据库备份清单 | Low | Medium | low |
 | TM-009 | 同账户本地进程 | 可读取 `.run` 或调用 loopback | 窃取令牌并停止服务 | 可恢复的本地可用性中断 | 本地服务 | 128-bit 随机令牌；Git 忽略；隐藏接口；错误令牌 404；正常退出清理 PID 文件 | 同账户恶意进程本就能终止用户进程 | 保持单用户边界；多人/服务化时改用 OS 服务控制和 ACL | 非预期 shutdown 与启动日志 | Low | Low | low |
+| TM-010 | 查询内容、真实搜索提供方或结果页面 | 用户启用真实 provider 并确认查询或点击结果 | 保留敏感查询、返回误导/恶意链接、伪造来源类型，或通过直接 API 绕过界面确认消耗预算 | 隐私披露、错误学习、跟踪、费用或跳转风险 | 外部查询、浏览器、预算、回答完整性 | 默认无 provider；只允许普通知识；常见隐私/凭据失败关闭；精确查询确认；一次调用无自动重试；有界公共 HTTPS；`[W]` 分区、未核验标签、`no-referrer`、零持久化 | 不是完整 DLP；UI 确认不是 API 认证；未验证 DNS/重定向/供应方保留和页面安全；来源类型由提供方自报 | 接入前独立批准和适配器安全设计；限制 endpoint/超时/响应/并发/费用；必要时使用一次性确认许可；建立来源域策略和审计摘要 | 不含正文的调用数、拒绝原因、提供方请求 ID、费用和危险候选计数 | Low（默认关闭） | Medium | medium |
 
 ## Criticality calibration
 
 - Critical：当前本地边界下可在无本机权限前提直接远程执行代码、读取完整 Vault 或窃取 API 密钥；或默认配置即可不可恢复地批量破坏原文。例：默认公网未认证的任意文件读取；Markdown 直接触发系统命令；启动即递归删除 Vault。当前未发现。
 - High：需要有限前提即可泄漏大量简历/笔记、稳定绕过来源边界或造成显著远端费用。例：loopback 服务实际被发布到公网且可枚举完整资料；任意 namespace/path 参数绕过；密钥进入错误响应。当前未发现默认成立项。
-- Medium：依赖部署边界改变、恶意文档被召回或错误供应方配置，可能造成部分隐私披露、事实污染或费用。TM-002、TM-003、TM-004 属于此级。
+- Medium：依赖部署边界改变、恶意文档被召回或错误供应方配置，可能造成部分隐私披露、事实污染或费用。TM-002、TM-003、TM-004、条件性的 TM-010 属于此级。
 - Low：需要同账户权限、明显配置失误或易恢复的本地 DoS，且已有硬控制或重建路径。TM-001 修复后的残余风险、TM-005、TM-006、TM-007、TM-008、TM-009 属于此级。
 
 ## Focus paths for security review
@@ -154,12 +164,13 @@ flowchart LR
 | `src/interview_agent/storage/conversation_history.py` | 聊天正文最小化、保留期、删除和绝对引用边界 | TM-005, TM-008 |
 | `src/interview_agent/api/history.py` | 本地正文读取和删除接口 | TM-003, TM-008 |
 | `src/interview_agent/api/system.py`、`scripts/*.ps1` | 停止令牌、PID 身份和可用性边界 | TM-009 |
+| `src/interview_agent/application/external_search.py`、`api/external_search.py` | 外发策略、显式确认、提供方调用上限、候选 URL 和零持久化边界 | TM-003, TM-007, TM-010 |
 | `src/interview_agent/acceptance/real_vault.py` | 真实 Vault 指纹、匿名报告和运行时写入隔离 | TM-001, TM-002 |
 | `pyproject.toml` | 依赖安装与供应链复现性 | TM-006 |
 
 ## Quality check
 
-- [x] 覆盖 HTTP、配置、文件系统、Embedding、SQLite、Chroma、LLM 和验收入口。
+- [x] 覆盖 HTTP、配置、文件系统、Embedding、SQLite、Chroma、LLM、可选外部搜索和验收入口。
 - [x] 每个主要信任边界至少映射到一个威胁。
 - [x] 区分运行时、开发/测试和供应链。
 - [x] 使用用户已确认的单机单用户、无公网、敏感 Vault 上下文校准评级。

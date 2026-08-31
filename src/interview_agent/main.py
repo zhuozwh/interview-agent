@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 # 使用别名是为了以后存在多个 router 时仍能看出各自来源。
 from interview_agent.api.ask import router as ask_router
 from interview_agent.api.evidence import router as evidence_router
+from interview_agent.api.external_search import router as external_search_router
 from interview_agent.api.health import router as health_router
 from interview_agent.api.history import router as history_router
 from interview_agent.api.system import router as system_router
@@ -22,7 +23,9 @@ from interview_agent.api.web import _WEB_DIRECTORY, router as web_router
 from interview_agent.application import (
     AskService,
     CitationEvidenceService,
+    ControlledExternalSearchService,
     ConversationHistoryService,
+    ExternalSearchService,
     LazyLocalAskService,
     LocalConversationHistoryService,
     LocalCitationEvidenceService,
@@ -40,6 +43,7 @@ def create_app(
     ask_service: AskService | None = None,
     history_service: ConversationHistoryService | None = None,
     evidence_service: CitationEvidenceService | None = None,
+    external_search_service: ExternalSearchService | None = None,
 ) -> FastAPI:
     """创建并组装一个 FastAPI 应用；测试可传入独立配置。"""
     # 调用者传了 settings 就直接使用；正常启动未传时再读取默认配置和环境变量。
@@ -66,6 +70,11 @@ def create_app(
             current_history_service,
         )
     )
+    current_external_search_service = (
+        external_search_service
+        if external_search_service is not None
+        else ControlledExternalSearchService()
+    )
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -86,6 +95,7 @@ def create_app(
     application.state.ask_service = current_ask_service
     application.state.history_service = current_history_service
     application.state.evidence_service = current_evidence_service
+    application.state.external_search_service = current_external_search_service
     application.state.shutdown_callback = None
 
     # 把局部路由表装入应用；HTTP 层不直接持有 Agent 或存储实现。
@@ -99,6 +109,7 @@ def create_app(
     application.include_router(ask_router)
     application.include_router(history_router)
     application.include_router(evidence_router)
+    application.include_router(external_search_router)
     application.include_router(system_router)
     return application
 

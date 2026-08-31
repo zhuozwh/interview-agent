@@ -119,6 +119,38 @@ def test_chat_manual_retry_is_explicit_single_request_in_same_session() -> None:
     assert "NON_FAILURE_STATUSES" in javascript.text
 
 
+def test_external_search_requires_preview_confirmation_and_stays_ephemeral() -> None:
+    """外部资料只由知识问答手动触发，不进入本地引用或持久化协议。"""
+    application = create_app(Settings(_env_file=None))
+    page = asyncio.run(_get(application, "/"))
+    javascript = asyncio.run(_get(application, "/assets/app.js"))
+
+    assert "只有确认后才调用已配置的搜索服务" in page.text
+    assert "外部来源与本地引用分开" in page.text
+    assert "来源未核验" in javascript.text
+    assert "提供方标记" in javascript.text
+    assert javascript.text.count('fetch("/api/external-search/preview"') == 1
+    assert javascript.text.count('fetch("/api/external-search"') == 1
+    assert 'turn.intent === "knowledge_question"' in javascript.text
+    assert 'turn.status === "success" || turn.status === "no_evidence"' in javascript.text
+    assert "preview.provider_configured !== true" in javascript.text
+    assert "window.confirm" in javascript.text
+    assert "confirmed_query: preview.query" in javascript.text
+    assert "不会发送本地证据、简历、项目资料或会话历史" in javascript.text
+    assert "body.persisted !== false" in javascript.text
+    assert "state.externalSearching" in javascript.text
+    assert "externalRequestSequence" in javascript.text
+    assert "source.citation_id" in javascript.text
+    assert "source.snippet" in javascript.text
+    assert "snippet.textContent" in javascript.text
+    assert 'url.protocol !== "https:"' in javascript.text
+    assert 'heading.rel = "noopener noreferrer"' in javascript.text
+    assert "payload.external" not in javascript.text
+    assert "localStorage" not in javascript.text
+    assert "sessionStorage" not in javascript.text
+    assert "setTimeout" not in javascript.text
+
+
 def test_health_remains_lightweight_after_web_ui_is_added(tmp_path) -> None:
     """只打开页面和健康检查仍不会创建会话数据库。"""
     database_path = tmp_path / "runtime" / "agent.sqlite3"

@@ -8,6 +8,8 @@ const state = {
   historyInfo: null,
   manualRetryQuestion: null,
   evidenceRequestSequence: 0,
+  externalSearching: false,
+  externalRequestSequence: 0,
 };
 
 const NON_FAILURE_STATUSES = new Set([
@@ -282,8 +284,223 @@ function createMessage(role, text, createdAt, turn = null) {
     content.append(followUps);
   }
 
+  if (turn && canOfferExternalSearch(turn)) {
+    content.append(createExternalSearchSection(turn));
+  }
+
   article.append(avatar, content);
   return article;
+}
+
+function canOfferExternalSearch(turn) {
+  return Boolean(turn?.question)
+    && turn.intent === "knowledge_question"
+    && (turn.status === "success" || turn.status === "no_evidence");
+}
+
+function createExternalSearchSection(turn) {
+  const section = document.createElement("section");
+  section.className = "external-search-section";
+  section.setAttribute("aria-label", "外部资料补充");
+
+  const header = document.createElement("div");
+  header.className = "external-search-header";
+  const title = document.createElement("strong");
+  title.textContent = "外部资料";
+  const boundary = document.createElement("span");
+  boundary.textContent = "与本地引用分离 · 来源未核验 · 仅本轮临时显示";
+  header.append(title, boundary);
+  section.append(header);
+
+  if (turn.external_search_message) {
+    const status = document.createElement("p");
+    status.className = `external-search-status external-${turn.external_search_status || "idle"}`;
+    status.textContent = turn.external_search_message;
+    section.append(status);
+  }
+
+  if (Array.isArray(turn.external_sources) && turn.external_sources.length) {
+    const list = document.createElement("div");
+    list.className = "external-source-list";
+    for (const source of turn.external_sources) {
+      list.append(createExternalSourceCard(source));
+    }
+    section.append(list);
+  }
+
+  if (turn.external_search_status !== "success") {
+    const search = document.createElement("button");
+    search.className = "external-search-button";
+    search.type = "button";
+    search.disabled = state.externalSearching;
+    search.textContent = state.externalSearching
+      ? "正在准备外部查询…"
+      : "联网补充";
+    search.title = "先在本地预览脱敏查询，确认后才会调用已配置的搜索服务";
+    search.addEventListener("click", () => requestExternalSearch(turn));
+    section.append(search);
+  }
+  return section;
+}
+
+function createExternalSourceCard(source) {
+  const card = document.createElement("article");
+  card.className = "external-source-card";
+
+  const meta = document.createElement("div");
+  meta.className = "external-source-meta";
+  const citation = document.createElement("span");
+  citation.className = "external-citation-id";
+  citation.textContent = `[${source.citation_id}]`;
+  const domain = document.createElement("span");
+  domain.textContent = (
+    `${externalSourceTypeLabel(source.source_type)}（提供方标记） · ${source.display_domain}`
+  );
+  meta.append(citation, domain);
+
+  const safeUrl = safeExternalUrl(source.url);
+  const heading = document.createElement(safeUrl ? "a" : "strong");
+  heading.className = "external-source-title";
+  heading.textContent = source.title || "未命名外部来源";
+  if (safeUrl) {
+    heading.href = safeUrl;
+    heading.target = "_blank";
+    heading.rel = "noopener noreferrer";
+    heading.referrerPolicy = "no-referrer";
+  }
+
+  const snippet = document.createElement("p");
+  snippet.textContent = source.snippet || "没有可显示的摘要。";
+  card.append(meta, heading, snippet);
+  return card;
+}
+
+function externalSourceTypeLabel(sourceType) {
+  const labels = {
+    official_documentation: "官方文档",
+    standard: "标准",
+    paper: "论文",
+    official_project: "官方项目",
+    web: "网页",
+  };
+  return labels[sourceType] || "网页";
+}
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) {
+      return null;
+    }
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+async function requestExternalSearch(turn) {
+  if (state.externalSearching || !canOfferExternalSearch(turn)) {
+    return;
+  }
+  state.externalSearching = true;
+  const requestSequence = ++state.externalRequestSequence;
+  turn.external_search_status = "previewing";
+  turn.external_search_message = "正在本地生成将要外发的脱敏查询预览…";
+  turn.external_sources = [];
+  renderConversation();
+
+  try {
+    const previewResponse = await fetch("/api/external-search/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ question: turn.question }),
+      cache: "no-store",
+    });
+    const preview = await previewResponse.json();
+    if (requestSequence !== state.externalRequestSequence) {
+      return;
+    }
+    if (!previewResponse.ok) {
+      throw new Error(externalSearchErrorMessage(previewResponse.status));
+    }
+    if (preview.allowed !== true) {
+      turn.external_search_status = "refused";
+      turn.external_search_message = preview.message || "当前问题不能进入外部搜索边界。";
+      return;
+    }
+    if (preview.provider_configured !== true) {
+      turn.external_search_status = "unconfigured";
+      turn.external_search_message = (
+        "v0.5.4 已完成脱敏预览和来源展示框架；真实搜索提供方尚未配置，本次没有联网。"
+      );
+      return;
+    }
+    const confirmed = window.confirm(
+      `即将向 ${preview.provider_name} 发送以下查询：\n\n${preview.query}\n\n`
+      + `只发送屏幕显示的这条查询，最多返回 ${preview.max_results} 个来源；`
+      + "不会发送本地证据、简历、项目资料或会话历史。是否继续？",
+    );
+    if (!confirmed) {
+      turn.external_search_status = "cancelled";
+      turn.external_search_message = "已取消；没有调用外部搜索服务。";
+      return;
+    }
+
+    turn.external_search_status = "loading";
+    turn.external_search_message = "正在获取独立的外部资料；本地回答不会被覆盖。";
+    renderConversation();
+    const response = await fetch("/api/external-search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        question: turn.question,
+        confirmed_query: preview.query,
+      }),
+      cache: "no-store",
+    });
+    const body = await response.json();
+    if (requestSequence !== state.externalRequestSequence) {
+      return;
+    }
+    if (!response.ok) {
+      throw new Error(externalSearchErrorMessage(response.status));
+    }
+    if (body.persisted !== false || !Array.isArray(body.sources)) {
+      throw new Error("外部搜索返回了不符合临时结果协议的数据。");
+    }
+    turn.external_search_status = "success";
+    turn.external_search_id = body.search_id;
+    turn.external_sources = body.sources;
+    turn.external_search_message = body.sources.length
+      ? `已从 ${body.provider_name} 返回 ${body.sources.length} 个独立外部来源；刷新或切换会话后不会保留。`
+      : "外部搜索已完成，但没有返回可安全展示的公开来源。";
+  } catch (error) {
+    if (requestSequence !== state.externalRequestSequence) {
+      return;
+    }
+    turn.external_search_status = "error";
+    turn.external_search_message = error.message || "外部搜索暂不可用，本地回答不受影响。";
+  } finally {
+    if (requestSequence === state.externalRequestSequence) {
+      state.externalSearching = false;
+      renderConversation();
+    }
+  }
+}
+
+function externalSearchErrorMessage(status) {
+  const messages = {
+    403: "当前问题只能使用本地证据，不能通过联网补写个人事实。",
+    409: "查询预览已经变化，请重新点击“联网补充”确认。",
+    422: "当前问题无法生成安全的外部查询。",
+    503: "外部搜索服务尚未配置或暂不可用，本地回答不受影响。",
+  };
+  return messages[status] || "外部搜索暂不可用，本地回答不受影响。";
+}
+
+function cancelExternalSearch() {
+  state.externalRequestSequence += 1;
+  state.externalSearching = false;
 }
 
 function appendSafeFormattedAnswer(container, text) {
@@ -508,6 +725,7 @@ function renderPrivacyInfo(info) {
 }
 
 async function openSession(sessionId) {
+  cancelExternalSearch();
   closeEvidence();
   setNotice("");
   try {
@@ -531,6 +749,7 @@ async function openSession(sessionId) {
 }
 
 function newConversation() {
+  cancelExternalSearch();
   closeEvidence();
   state.sessionId = null;
   state.currentTitle = "新会话";
@@ -555,6 +774,7 @@ async function deleteSession(sessionId, title) {
       throw new Error(body.detail || "删除失败。");
     }
     if (state.sessionId === sessionId) {
+      cancelExternalSearch();
       closeEvidence();
       state.sessionId = null;
       state.currentTitle = "新会话";
