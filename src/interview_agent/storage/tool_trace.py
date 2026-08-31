@@ -111,7 +111,8 @@ class SQLiteToolTraceStore:
         if trace_id is not None:
             query += " WHERE trace_id = ?"
             parameters = (trace_id,)
-        query += " ORDER BY started_at, tool_call_id"
+        # Windows 时钟可能让连续调用拥有相同时间戳；并列时按实际写入顺序读取。
+        query += " ORDER BY started_at, rowid"
 
         with self.database.connection() as connection:
             rows = connection.execute(query, parameters).fetchall()

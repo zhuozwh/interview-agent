@@ -67,6 +67,30 @@ def test_records_and_recovers_trace_without_sensitive_columns(
     assert "chunk-1" in serialized[1]
 
 
+def test_same_timestamp_records_preserve_write_order(
+    temporary_directory: Path,
+) -> None:
+    """低分辨率系统时钟不能让随机调用 ID 打乱审计先后。"""
+    database = SQLiteDatabase(temporary_directory / "state.db")
+    store = SQLiteToolTraceStore(database)
+    store.initialize()
+    first = replace(
+        _trace(),
+        tool_call_id="call-z",
+        tool_name="get_project_context",
+    )
+    second = replace(
+        _trace(),
+        tool_call_id="call-a",
+        tool_name="get_resume_context",
+    )
+
+    store.record(first)
+    store.record(second)
+
+    assert store.load_records("trace-1") == (first, second)
+
+
 def test_rejects_inconsistent_trace_and_detects_corrupt_json(
     temporary_directory: Path,
 ) -> None:

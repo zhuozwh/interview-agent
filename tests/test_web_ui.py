@@ -60,6 +60,34 @@ def test_chat_assets_load_without_external_dependencies_or_unsafe_html() -> None
     assert "sessionStorage" not in combined_scripts
 
 
+def test_citations_open_current_local_evidence_without_client_paths() -> None:
+    """可展开引用只提交保存身份，并始终把 Markdown 正文当纯文本。"""
+    application = create_app(Settings(_env_file=None))
+    page = asyncio.run(_get(application, "/"))
+    javascript = asyncio.run(_get(application, "/assets/app.js"))
+
+    assert 'id="evidence-panel"' in page.text
+    assert "当前只读 Markdown 文件，不是回答时的快照" in page.text
+    assert "检索分数表示相关性排序，不代表答案正确率" in page.text
+    assert javascript.text.count("fetch(`/api/evidence/${endpoint}`") == 1
+    assert "[state.sessionId, turn.trace_id, citation.citation_id]" in javascript.text
+    assert ".map((value) => encodeURIComponent(value))" in javascript.text
+    assert "evidence.source_namespace" not in javascript.text.split(
+        "fetch(`/api/evidence/${endpoint}`"
+    )[0][-300:]
+    assert "evidence.relative_path" not in javascript.text.split(
+        "fetch(`/api/evidence/${endpoint}`"
+    )[0][-300:]
+    assert "elements.evidenceContent.textContent" in javascript.text
+    assert 'turn.evidence_available === true' in javascript.text
+    assert 'body.history_status === "saved"' in javascript.text
+    assert 'cache: "no-store"' in javascript.text
+    assert "requestSequence !== state.evidenceRequestSequence" in javascript.text
+    assert "引用对应的本地文件或行号已经变化" in javascript.text
+    assert "body.detail || \"无法读取这条本地证据。\"" not in javascript.text
+    assert "setTimeout" not in javascript.text
+
+
 def test_chat_ui_exposes_evidence_strength_and_actionable_single_errors() -> None:
     """中等证据不能再隐身，模型错误只在消息内给出中文动作。"""
     application = create_app(Settings(_env_file=None))

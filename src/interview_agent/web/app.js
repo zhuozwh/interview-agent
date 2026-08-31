@@ -7,6 +7,7 @@ const state = {
   sending: false,
   historyInfo: null,
   manualRetryQuestion: null,
+  evidenceRequestSequence: 0,
 };
 
 const NON_FAILURE_STATUSES = new Set([
@@ -44,6 +45,18 @@ const elements = {
   question: document.querySelector("#question"),
   send: document.querySelector("#send"),
   notice: document.querySelector("#notice"),
+  evidenceScrim: document.querySelector("#evidence-scrim"),
+  evidencePanel: document.querySelector("#evidence-panel"),
+  evidenceClose: document.querySelector("#evidence-close"),
+  evidenceStatus: document.querySelector("#evidence-status"),
+  evidenceDetails: document.querySelector("#evidence-details"),
+  evidenceNamespace: document.querySelector("#evidence-namespace"),
+  evidencePath: document.querySelector("#evidence-path"),
+  evidenceHeading: document.querySelector("#evidence-heading"),
+  evidenceLines: document.querySelector("#evidence-lines"),
+  evidenceScore: document.querySelector("#evidence-score"),
+  evidenceContent: document.querySelector("#evidence-content"),
+  evidenceTruncated: document.querySelector("#evidence-truncated"),
 };
 
 function setNotice(message) {
@@ -79,6 +92,97 @@ function closeSidebar() {
 function openSidebar() {
   elements.sidebar.classList.add("open");
   elements.sidebarScrim.hidden = false;
+}
+
+function closeEvidence() {
+  state.evidenceRequestSequence += 1;
+  elements.evidencePanel.hidden = true;
+  elements.evidenceScrim.hidden = true;
+}
+
+function showEvidencePanel() {
+  closeSidebar();
+  elements.evidencePanel.hidden = false;
+  elements.evidenceScrim.hidden = false;
+  elements.evidencePanel.focus();
+}
+
+function setEvidenceLoading(citation) {
+  elements.evidenceDetails.hidden = true;
+  elements.evidenceStatus.hidden = false;
+  elements.evidenceStatus.classList.remove("error");
+  elements.evidenceStatus.textContent = `正在读取 [${citation.citation_id}] 的当前本地原文…`;
+}
+
+function setEvidenceError(message) {
+  elements.evidenceDetails.hidden = true;
+  elements.evidenceStatus.hidden = false;
+  elements.evidenceStatus.classList.add("error");
+  elements.evidenceStatus.textContent = message;
+}
+
+function renderEvidence(evidence) {
+  const namespaceLabels = {
+    notes: "知识笔记",
+    projects: "项目资料",
+    resume: "简历资料",
+  };
+  elements.evidenceNamespace.textContent = namespaceLabels[evidence.source_namespace]
+    || evidence.source_namespace;
+  elements.evidencePath.textContent = evidence.relative_path;
+  elements.evidenceHeading.textContent = evidence.heading_path?.length
+    ? evidence.heading_path.join(" / ")
+    : "未登记标题路径";
+  elements.evidenceLines.textContent = `原引用 L${evidence.citation_start_line}-${evidence.citation_end_line} · 当前展示 L${evidence.excerpt_start_line}-${evidence.excerpt_end_line}`;
+  elements.evidenceScore.textContent = Number.isFinite(evidence.score)
+    ? `${evidence.score.toFixed(4)}（相关性，不是正确率）`
+    : "未知";
+  // 证据正文必须作为纯文本渲染，不能解释其中的 HTML 或脚本。
+  elements.evidenceContent.textContent = evidence.content || "当前引用位置没有可显示的文本。";
+  elements.evidenceTruncated.hidden = evidence.truncated !== true;
+  elements.evidenceStatus.hidden = true;
+  elements.evidenceDetails.hidden = false;
+}
+
+async function openEvidence(turn, citation) {
+  if (!state.sessionId || !turn?.trace_id || !citation?.citation_id) {
+    return;
+  }
+  showEvidencePanel();
+  setEvidenceLoading(citation);
+  const requestSequence = ++state.evidenceRequestSequence;
+  const endpoint = [state.sessionId, turn.trace_id, citation.citation_id]
+    .map((value) => encodeURIComponent(value))
+    .join("/");
+  try {
+    const response = await fetch(`/api/evidence/${endpoint}`, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(evidenceErrorMessage(response.status));
+    }
+    if (requestSequence !== state.evidenceRequestSequence) {
+      return;
+    }
+    renderEvidence(body);
+  } catch (error) {
+    if (requestSequence !== state.evidenceRequestSequence) {
+      return;
+    }
+    setEvidenceError(error.message || "无法读取这条本地证据。");
+  }
+}
+
+function evidenceErrorMessage(status) {
+  const messages = {
+    404: "这条已保存引用不存在，可能已被删除或清理。",
+    410: "引用对应的本地文件或行号已经变化，当前无法安全读取。",
+    422: "这条引用身份无效，页面不会尝试读取文件。",
+    503: "本地历史或证据服务暂不可用，请检查启动窗口。",
+  };
+  return messages[status] || "无法读取这条本地证据。";
 }
 
 function resizeTextarea() {
@@ -144,10 +248,21 @@ function createMessage(role, text, createdAt, turn = null) {
     citations.className = "citation-list";
     citations.setAttribute("aria-label", "回答引用");
     for (const citation of turn.citations) {
-      const chip = document.createElement("span");
+      const evidenceAvailable = turn.evidence_available === true
+        && Boolean(state.sessionId)
+        && Boolean(turn.trace_id);
+      const chip = document.createElement(evidenceAvailable ? "button" : "span");
       chip.className = "citation-chip";
       const heading = citation.heading_path?.length ? ` · ${citation.heading_path.join(" / ")}` : "";
       chip.textContent = `[${citation.citation_id}] ${citation.relative_path}${heading} · L${citation.start_line}-${citation.end_line}`;
+      if (evidenceAvailable) {
+        chip.type = "button";
+        chip.title = "打开当前本地 Markdown 原文核对引用";
+        chip.addEventListener("click", () => openEvidence(turn, citation));
+      } else {
+        chip.classList.add("unavailable");
+        chip.title = "本轮未成功保存到本地历史，无法通过受控身份重新打开证据。";
+      }
       citations.append(chip);
     }
     content.append(citations);
@@ -393,6 +508,7 @@ function renderPrivacyInfo(info) {
 }
 
 async function openSession(sessionId) {
+  closeEvidence();
   setNotice("");
   try {
     const response = await fetch(`/api/history/${encodeURIComponent(sessionId)}`, {
@@ -415,6 +531,7 @@ async function openSession(sessionId) {
 }
 
 function newConversation() {
+  closeEvidence();
   state.sessionId = null;
   state.currentTitle = "新会话";
   state.turns = [];
@@ -438,6 +555,7 @@ async function deleteSession(sessionId, title) {
       throw new Error(body.detail || "删除失败。");
     }
     if (state.sessionId === sessionId) {
+      closeEvidence();
       state.sessionId = null;
       state.currentTitle = "新会话";
       state.turns = [];
@@ -535,6 +653,7 @@ async function submitQuestion(event) {
       confidence: body.confidence,
       citations: body.citations || [],
       follow_up_questions: body.follow_up_questions || [],
+      evidence_available: body.history_status === "saved",
     };
     if (body.history_status === "failed") {
       setNotice("回答已生成，但本地历史保存失败。请先复制回答，不要自动重试。修复配置后重启应用。");
@@ -575,6 +694,13 @@ elements.clearHistory.addEventListener("click", clearHistory);
 elements.privacyButton.addEventListener("click", () => elements.privacyDialog.showModal());
 elements.mobileMenu.addEventListener("click", openSidebar);
 elements.sidebarScrim.addEventListener("click", closeSidebar);
+elements.evidenceClose.addEventListener("click", closeEvidence);
+elements.evidenceScrim.addEventListener("click", closeEvidence);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !elements.evidencePanel.hidden) {
+    closeEvidence();
+  }
+});
 for (const suggestion of document.querySelectorAll("[data-prompt]")) {
   suggestion.addEventListener("click", () => fillPrompt(suggestion.dataset.prompt));
 }

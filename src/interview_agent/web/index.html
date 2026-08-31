@@ -90,6 +90,56 @@
     </div>
 
     <div class="sidebar-scrim" id="sidebar-scrim" hidden></div>
+    <div class="evidence-scrim" id="evidence-scrim" hidden></div>
+
+    <aside
+      class="evidence-panel"
+      id="evidence-panel"
+      aria-labelledby="evidence-title"
+      tabindex="-1"
+      hidden
+    >
+      <div class="evidence-header">
+        <div>
+          <p class="eyebrow">LOCAL EVIDENCE</p>
+          <h2 id="evidence-title">核对本地证据</h2>
+        </div>
+        <button class="evidence-close" id="evidence-close" type="button" aria-label="关闭证据面板">×</button>
+      </div>
+
+      <p class="evidence-status" id="evidence-status" role="status">选择一条引用查看当前原文。</p>
+
+      <div class="evidence-details" id="evidence-details" hidden>
+        <dl class="evidence-meta">
+          <div>
+            <dt>资料域</dt>
+            <dd id="evidence-namespace">—</dd>
+          </div>
+          <div>
+            <dt>文件</dt>
+            <dd id="evidence-path">—</dd>
+          </div>
+          <div>
+            <dt>标题路径</dt>
+            <dd id="evidence-heading">—</dd>
+          </div>
+          <div>
+            <dt>引用位置</dt>
+            <dd id="evidence-lines">—</dd>
+          </div>
+          <div>
+            <dt>检索分数</dt>
+            <dd id="evidence-score">—</dd>
+          </div>
+        </dl>
+
+        <div class="evidence-boundary-note">
+          展示的是当前只读 Markdown 文件，不是回答时的快照；文件修改后内容可能不同。检索分数表示相关性排序，不代表答案正确率。
+        </div>
+        <pre class="evidence-content" id="evidence-content"></pre>
+        <p class="evidence-truncated" id="evidence-truncated" hidden>片段已按本地安全上限截断。</p>
+      </div>
+    </aside>
 
     <dialog class="privacy-dialog" id="privacy-dialog">
       <form method="dialog">

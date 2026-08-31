@@ -12,6 +12,11 @@ from interview_agent.retrieval.embedding import (
     embed_texts,
     validate_embedding_provider,
 )
+from interview_agent.retrieval.evidence import (
+    LocalEvidenceExcerpt,
+    LocalEvidenceReadError,
+    read_local_markdown_evidence,
+)
 from interview_agent.retrieval.markdown import (
     MarkdownDiscoveryError,
     MarkdownDocument,
@@ -76,6 +81,8 @@ __all__ = [
     "IndexChunk",
     "IndexDocument",
     "IndexPlan",
+    "LocalEvidenceExcerpt",
+    "LocalEvidenceReadError",
     "MarkdownDiscoveryError",
     "MarkdownChunk",
     "MarkdownDocument",
@@ -102,6 +109,7 @@ __all__ = [
     "load_markdown_documents",
     "prepare_index_document",
     "prepare_index_documents",
+    "read_local_markdown_evidence",
     "reconstruct_document_content",
     "separate_front_matter",
     "separate_front_matter_documents",

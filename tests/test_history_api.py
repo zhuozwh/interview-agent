@@ -149,6 +149,7 @@ def test_ask_persists_restores_and_deletes_controlled_history(
     assert body["turns"][0]["citations"][0]["relative_path"] == (
         "cpp/raii.md"
     )
+    assert body["turns"][0]["evidence_available"] is True
     serialized = repr(body)
     assert "candidate@example.com" not in serialized
     assert "不应持久化的上一问" not in serialized

@@ -43,6 +43,7 @@ class HistoryTurnApiResponse(BaseModel):
     confidence: str | None
     citations: tuple[HistoryCitationApiResponse, ...]
     follow_up_questions: tuple[str, ...]
+    evidence_available: bool
 
 
 class HistorySessionSummaryApiResponse(BaseModel):
@@ -192,6 +193,7 @@ def _turn_response(turn: HistoryTurn) -> HistoryTurnApiResponse:
             for citation in turn.citations
         ),
         follow_up_questions=turn.follow_up_questions,
+        evidence_available=True,
     )
 
 

@@ -6,9 +6,9 @@
 
 ## 当前阶段
 
-当前开发版本为 **v0.5.2**，处于 **Phase 3：产品化与可用性增强**。
+当前开发版本为 **v0.5.3**，处于 **Phase 3：产品化与可用性增强**。
 
-v0.4.6 及以前保持不可变。Phase 2 已完成检索失败归因、固定 namespace、独立阈值、事实证据门控、有限一轮上下文、真实 LLM 合成边界与生产装配收口。v0.5.0 增加本地聊天页、受控会话历史、启动前检查和一键启动/停止；v0.5.1 修复 Windows PowerShell 5.1 启动兼容性；v0.5.2 根据真实使用失败补齐输出预算预检、中文单点错误、显式手动重试、安全有限格式和证据强度提示。v0.5.x 不改动 Phase 2 的阈值、Top-K、Router、提示词或答案接受条件。Git/源码扫描、C++ 源码理解和 MATLAB 不在本阶段范围。
+v0.4.6 及以前保持不可变。Phase 2 已完成检索失败归因、固定 namespace、独立阈值、事实证据门控、有限一轮上下文、真实 LLM 合成边界与生产装配收口。v0.5.0 增加本地聊天页、受控会话历史、启动前检查和一键启动/停止；v0.5.1 修复 Windows PowerShell 5.1 启动兼容性；v0.5.2 根据真实使用失败补齐输出预算预检、中文单点错误、显式手动重试、安全有限格式和证据强度提示；v0.5.3 增加按已保存引用身份打开当前本地 Markdown 原文的核验面板，不把证据正文写入历史。v0.5.x 不改动 Phase 2 的阈值、Top-K、Router、提示词或答案接受条件。Git/源码扫描、C++ 源码理解和 MATLAB 不在本阶段范围。
 
 已实现：
 
@@ -58,6 +58,7 @@ v0.4.6 及以前保持不可变。Phase 2 已完成检索失败归因、固定 n
 - 从 Markdown 到 FastAPI 响应的完整本地集成测试。
 - 根路径 `/` 的本地聊天界面，无需直接使用 FastAPI `/docs`；
 - 回答、相对引用、置信提示、安全错误和建议追问的浏览器展示；
+- 已保存引用可打开右侧只读证据面板，核对当前 Markdown 原文、标题路径、行号和相关性分数；
 - 回答的有限粗体、列表和行内代码格式，所有 HTML、链接和伪造引用仍按纯文本处理；
 - 中文单点错误、稳定诊断码，以及确认费用后才执行的一次手动重试；
 - SQLite 受控会话历史、保留期与数量上限、逐会话删除和全部清空；
@@ -130,9 +131,9 @@ Windows 推荐直接双击仓库根目录的 `start.cmd`。它会先以只读方
 
 应用默认监听 `http://127.0.0.1:8000`。普通用户入口是 `GET /` 的聊天页；健康检查、问答接口和开发调试文档分别是 `GET /health`、`POST /ask` 与 `GET /docs`。
 
-不要提交包含本机配置或密钥的 `.env`。启动、健康检查、浏览聊天页和读取历史都不会加载 Embedding 或调用远端 LLM；提交实际问题时才会按既有 Phase 2 边界把当前问题和完成回答所需的最小证据发送给配置的 LLM endpoint。任何新的自动化真实远端验收仍必须另行确认模型、endpoint、次数、token、费用和允许外发范围；v0.5.0、v0.5.1 与 v0.5.2 的开发和自动化验收均没有发起新远端调用。
+不要提交包含本机配置或密钥的 `.env`。启动、健康检查、浏览聊天页、读取历史和展开已保存引用都不会加载 Embedding 或调用远端 LLM；提交实际问题时才会按既有 Phase 2 边界把当前问题和完成回答所需的最小证据发送给配置的 LLM endpoint。任何新的自动化真实远端验收仍必须另行确认模型、endpoint、次数、token、费用和允许外发范围；v0.5.0 至 v0.5.3 的开发和自动化验收均没有发起新远端调用。
 
-真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)，Phase 2 最终装配证据见 [v0.4.6 生产端到端收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)，v0.5.0 的产品化证据见 [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)，Windows 启动热修复证据见 [v0.5.1 Windows 启动闭环](docs/acceptance/V0.5.1_WINDOWS_STARTUP_HOTFIX.md)，真实失败驱动的界面与诊断收口见 [v0.5.2 诊断与可读性验收](docs/acceptance/V0.5.2_DIAGNOSTIC_USABILITY.md)。
+真实 Vault 验收使用单独、显式启用的离线入口。它强制本地 Embedding、拒绝 LLM 密钥、比较 Vault 前后指纹，并只输出匿名报告；完整配置、问题集协议和退出码见 [真实 Vault 只读验收](docs/acceptance/REAL_VAULT_ACCEPTANCE.md)。v0.3.1 的原始指标和失败见 [v0.3.1 正式基线](docs/acceptance/V0.3.1_BASELINE.md)，v0.3.2 的安全边界见 [v0.3.2 安全收口](docs/acceptance/V0.3.2_SECURITY_CLOSURE.md)，v0.4.0 首轮归因见 [v0.4.0 Phase 2 首轮](docs/acceptance/V0.4.0_PHASE2_ROUND1.md)，v0.4.1 的留出协议见 [v0.4.1 留出评测](docs/acceptance/V0.4.1_HOLDOUT_PROTOCOL.md)，远端调用预算与确认项见 [v0.4.2 LLM 前置检查](docs/acceptance/V0.4.2_LLM_PREFLIGHT.md)，三轮真实模型归因和最终结果见 [v0.4.3 真实 LLM 验收](docs/acceptance/V0.4.3_REAL_LLM_ACCEPTANCE.md)，有限上下文边界见 [v0.4.4 一轮上下文验收](docs/acceptance/V0.4.4_LIMITED_CONTEXT.md)，用户冻结真实留出结果见 [v0.4.5 独立 holdout](docs/acceptance/V0.4.5_INDEPENDENT_HOLDOUT.md)，Phase 2 最终装配证据见 [v0.4.6 生产端到端收口](docs/acceptance/V0.4.6_PHASE2_CLOSURE.md)，v0.5.0 的产品化证据见 [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)，Windows 启动热修复证据见 [v0.5.1 Windows 启动闭环](docs/acceptance/V0.5.1_WINDOWS_STARTUP_HOTFIX.md)，真实失败驱动的界面与诊断收口见 [v0.5.2 诊断与可读性验收](docs/acceptance/V0.5.2_DIAGNOSTIC_USABILITY.md)，本地引用原文核验边界见 [v0.5.3 证据核验验收](docs/acceptance/V0.5.3_EVIDENCE_VERIFICATION.md)。
 
 使用 `/ask` 前，先创建并配置三个互不相同、互不包含的数据源目录，并设置 `LLM_API_KEY`。默认目录是 `knowledge/interview`、`knowledge/projects` 和 `knowledge/resume`；它们都必须位于 `ALLOWED_DATA_DIRECTORIES` 白名单内。第一次请求会同步三个目录的 Markdown 索引，模型缓存不存在时还可能下载公开 Embedding 模型，因此耗时会明显高于后续请求。
 
@@ -439,6 +440,10 @@ v0.5.1 来自真实用户入口失败：`start.cmd` 在 Windows PowerShell 5.1 �
 
 v0.5.2 来自真实聊天中的截断、英文重复错误、Markdown 原样显示和无关引用不易识别。preflight 现在拒绝已知会截断日常回答的 256 token 验收预算，并提醒 `acceptance-*` 运行时路径不会被自动迁移；界面用安全 DOM 展示有限粗体、列表和行内代码，始终显示证据强度，把失败统一为一处中文说明，并只在用户确认重新检索、远端调用和潜在费用后允许一次手动重试。API 与历史会在边界处净化任意底层错误正文。默认离线回归为 **338 passed、4 skipped**，恶意 HTML、脚本 URL、伪造引用、路径/密钥异常和重试循环对抗用例全部通过；没有新增真实远端调用。详细证据见 [v0.5.2 诊断与可读性验收](docs/acceptance/V0.5.2_DIAGNOSTIC_USABILITY.md)。
 
+## Phase 3 v0.5.3 本地证据核验验收
+
+v0.5.3 让成功保存到本地历史的结构化引用可以打开右侧核验面板。浏览器只提交 `session_id + trace_id + citation_id`，服务端从受控历史恢复 namespace、相对路径和行号，再在固定白名单内有界读取当前 Markdown；面板明确说明当前文件可能已变化、检索分数不是正确率。证据正文不进入 SQLite 或浏览器持久化，历史关闭、保存失败、引用删除或路径越界都不会降级成任意文件读取。默认离线回归为 **361 passed、5 skipped**；新增 skip 仅是当前 Windows 账户不能创建测试符号链接，其余穿越、伪造身份、内容注入、失效来源、超大/非法文件、循环导入和审计同时间戳乱序均已验证。没有请求 `/ask`、加载模型或发起远端调用。详细证据见 [v0.5.3 证据核验验收](docs/acceptance/V0.5.3_EVIDENCE_VERIFICATION.md)。
+
 ## 项目文档
 
 - [PROJECT_SPEC.md](PROJECT_SPEC.md)：产品范围、架构和开发路线；
@@ -455,3 +460,4 @@ v0.5.2 来自真实聊天中的截断、英文重复错误、Markdown 原样显�
 - [v0.5.0 本地可用闭环](docs/acceptance/V0.5.0_LOCAL_USABILITY.md)：记录聊天界面、受控历史、preflight、一键启停、失败归因和 Phase 2 零退化证据。
 - [v0.5.1 Windows 启动闭环](docs/acceptance/V0.5.1_WINDOWS_STARTUP_HOTFIX.md)：记录系统 PowerShell 5.1 中文脚本解码失败、热修复和真实双击入口验收。
 - [v0.5.2 诊断与可读性验收](docs/acceptance/V0.5.2_DIAGNOSTIC_USABILITY.md)：记录真实聊天失败、有限安全格式、错误净化、受控重试、对抗测试和剩余检索风险。
+- [v0.5.3 证据核验验收](docs/acceptance/V0.5.3_EVIDENCE_VERIFICATION.md)：记录受控引用身份、当前文件核验、路径/持久化边界、对抗测试和剩余风险。
