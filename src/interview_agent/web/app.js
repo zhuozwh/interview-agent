@@ -431,7 +431,7 @@ async function requestExternalSearch(turn) {
     if (preview.provider_configured !== true) {
       turn.external_search_status = "unconfigured";
       turn.external_search_message = (
-        "v0.5.4 已完成脱敏预览和来源展示框架；真实搜索提供方尚未配置，本次没有联网。"
+        "当前版本已完成脱敏预览和来源展示框架；真实搜索提供方尚未配置，本次没有联网。"
       );
       return;
     }
@@ -838,6 +838,12 @@ async function submitQuestion(event) {
   setSending(true);
   renderConversation();
   window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  const pendingNoticeTimer = window.setTimeout(() => {
+    if (state.sending && state.turns.includes(optimistic)) {
+      optimistic.answer = "仍在处理。首次提问可能需要加载本地模型并更新索引，请稍候，无需重复发送。";
+      renderConversation();
+    }
+  }, 10000);
 
   const payload = { question };
   if (state.sessionId) {
@@ -894,6 +900,7 @@ async function submitQuestion(event) {
     renderConversation();
     setNotice("");
   } finally {
+    window.clearTimeout(pendingNoticeTimer);
     setSending(false);
     elements.question.focus();
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });

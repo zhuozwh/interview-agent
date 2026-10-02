@@ -39,6 +39,9 @@ MAX_QUERY_CHARACTERS = 480
 MAX_TOTAL_CHARACTERS = 20_000
 
 _SAFE_IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_EXPLANATION_ACRONYM = re.compile(r"(?<![A-Za-z0-9])([A-Z][A-Z0-9]{2,11})(?![A-Za-z0-9])")
+_EXPLANATION_MARKERS = ("解释", "什么是", "介绍", "原理", "含义")
+_PRIVATE_IDENTIFIER_TERMS = {"APIKEY", "CREDENTIAL", "PASSWORD", "SECRET", "TOKEN"}
 
 
 class ScopedSearchStatus(StrEnum):
@@ -209,6 +212,25 @@ class ScopedSemanticSearchTool:
                         source_namespace=self.source_namespace,
                     )
                     ranked_results = _rank_candidates(query, raw_results)
+                    topic_rejected = False
+                    if self.source_namespace == "notes":
+                        terms = tuple(dict.fromkeys(_EXPLANATION_ACRONYM.findall(query)))
+                        if len(terms) >= 2:
+                            topic_rejected = any(
+                                result.score >= self.min_score
+                                and not any(
+                                    term.casefold() in result.content.casefold()
+                                    for term in terms
+                                )
+                                for result in ranked_results
+                            )
+                            ranked_results = tuple(
+                                result for result in ranked_results
+                                if any(
+                                    term.casefold() in result.content.casefold()
+                                    for term in terms
+                                )
+                            )
                     results = _select_evidence(
                         ranked_results,
                         min_score=self.min_score,
@@ -224,8 +246,35 @@ class ScopedSemanticSearchTool:
                         decision_code = "insufficient_fact_evidence"
                     elif results:
                         decision_code = "evidence_selected"
+                    elif topic_rejected:
+                        decision_code = "insufficient_topic_evidence"
                     else:
                         decision_code = "below_score_threshold"
+                        term = _explanation_term(query) if self.source_namespace == "notes" else None
+                        if term is not None:
+                            exact_results = search_chunks(
+                                query,
+                                top_k=request.top_k,
+                                embedding_provider=self.embedding_provider,
+                                vector_store=self.vector_store,
+                                state_store=self.state_store,
+                                source_namespace=self.source_namespace,
+                                required_document_term=term,
+                            )
+                            results = _select_evidence(
+                                _rank_candidates(
+                                    query,
+                                    tuple(
+                                        result for result in exact_results
+                                        if term in result.content
+                                    ),
+                                ),
+                                min_score=-1.0,
+                                max_total_characters=self.max_total_characters,
+                                content_transform=self.policy.content_transform,
+                            )
+                            if results:
+                                decision_code = "exact_term_fallback"
                     status = (
                         ScopedSearchStatus.SUCCESS
                         if results
@@ -332,6 +381,18 @@ class ScopedSemanticSearchTool:
                 decision_code="trace_write_failed",
             )
         return response
+
+
+def _explanation_term(question: str) -> str | None:
+    """只为单个明确技术缩写的解释问题启用本地词面降级。"""
+    if not any(marker in question for marker in _EXPLANATION_MARKERS):
+        return None
+    terms = tuple(dict.fromkeys(_EXPLANATION_ACRONYM.findall(question)))
+    return (
+        terms[0]
+        if len(terms) == 1 and terms[0] not in _PRIVATE_IDENTIFIER_TERMS
+        else None
+    )
 
 
 def _validate_request(request: object) -> ScopedSearchError | None:

@@ -166,6 +166,7 @@ class VectorStore(Protocol):
         *,
         top_k: int,
         source_namespace: str | None = None,
+        document_term: str | None = None,
     ) -> tuple[ChunkSearchResult, ...]:
         """查询最相似的片段。"""
 
@@ -291,6 +292,7 @@ def search_chunks(
     vector_store: VectorStore,
     state_store: VectorIndexStateStore,
     source_namespace: str | None = None,
+    required_document_term: str | None = None,
 ) -> tuple[ChunkSearchResult, ...]:
     """把问题转换为向量，并返回带来源路径、标题和原文行号的相关片段。"""
     if not isinstance(query, str) or not query.strip():
@@ -328,11 +330,21 @@ def search_chunks(
         return ()
 
     query_embedding = embed_query(embedding_provider, query)
-    return vector_store.search(
-        query_embedding,
-        top_k=top_k,
-        source_namespace=normalized_namespace,
-    )
+    search_options = {
+        "top_k": top_k,
+        "source_namespace": normalized_namespace,
+    }
+    if required_document_term is not None:
+        if (
+            not isinstance(required_document_term, str)
+            or not required_document_term
+            or len(required_document_term) > 16
+            or not required_document_term.isascii()
+            or not required_document_term.isalnum()
+        ):
+            raise VectorSearchInputError("required_document_term is invalid")
+        search_options["document_term"] = required_document_term
+    return vector_store.search(query_embedding, **search_options)
 
 
 def _force_full_rebuild(plan: IndexPlan) -> IndexPlan:

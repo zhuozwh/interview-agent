@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 import pytest
 
 from interview_agent.agent import (
+    AgentConfidence,
     AgentIntent,
     AgentRequest,
     AgentStatus,
@@ -119,6 +120,26 @@ def _llm_response(
             total_tokens=30,
         ),
     )
+
+
+def test_exact_term_fallback_answer_is_low_confidence() -> None:
+    """精确词面补回的证据可回答，但不得显示为常规中高证据强度。"""
+    tool = FakeSearchNotes(
+        replace(
+            _tool_response(results=(replace(_evidence(), score=0.52),)),
+            decision_code="exact_term_fallback",
+        )
+    )
+    llm = FakeLLM(_llm_response())
+    response = KnowledgeAgent(search_notes=tool, llm_client=llm).execute(
+        AgentRequest(question="请用适合口头表达的方式解释 RAII。"),
+        trace_id=_TRACE_ID,
+    )
+
+    assert response.status is AgentStatus.SUCCESS
+    assert response.confidence is AgentConfidence.LOW
+    assert tuple(citation.citation_id for citation in response.citations) == ("S1",)
+    assert len(llm.calls) == 1
 
 
 class FakeSearchNotes:
@@ -280,6 +301,7 @@ def test_no_evidence_and_unsupported_intent_stop_before_llm() -> None:
     )
     assert no_evidence.status is AgentStatus.NO_EVIDENCE
     assert "没有调用 LLM" in no_evidence.answer
+    assert no_evidence.follow_up_questions == ()
     assert len(no_result_tool.calls) == 1
     assert llm.calls == []
 

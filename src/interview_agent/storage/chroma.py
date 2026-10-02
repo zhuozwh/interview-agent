@@ -231,6 +231,7 @@ class ChromaVectorStore:
         *,
         top_k: int,
         source_namespace: str | None = None,
+        document_term: str | None = None,
     ) -> tuple[ChunkSearchResult, ...]:
         """用调用方提供的向量查询，并恢复为稳定的可引用结果。"""
         profile = self._require_profile()
@@ -250,6 +251,8 @@ class ChromaVectorStore:
         }
         if source_namespace is not None:
             query_arguments["where"] = {"source_namespace": source_namespace}
+        if document_term is not None:
+            query_arguments["where_document"] = {"$contains": document_term}
 
         try:
             raw_result = collection.query(**query_arguments)

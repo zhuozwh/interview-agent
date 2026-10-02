@@ -58,6 +58,14 @@ class ToolTestEmbedding:
         return [0.05, 0.05, 1.0]
 
 
+class CollidingEmbedding(ToolTestEmbedding):
+    """模拟不同主题被向量模型判为高度相似的候选。"""
+
+    @staticmethod
+    def _vector(text: str) -> list[float]:
+        return [1.0, 0.0, 0.0]
+
+
 class TimeoutQueryEmbedding(ToolTestEmbedding):
     """模型身份不变，只在查询阶段模拟超时。"""
 
@@ -210,6 +218,104 @@ def test_weak_results_become_explicit_no_results_and_content_is_bounded(
         assert bounded.status is SearchNotesStatus.SUCCESS
         assert sum(len(item.content) for item in bounded.results) <= 10
         assert bounded.results[0].content_truncated is True
+
+
+def test_raii_explanation_falls_back_to_exact_local_term(
+    temporary_directory: Path,
+) -> None:
+    """真实问法的向量误拒绝可由已索引的 RAII 原文安全补回。"""
+    source = temporary_directory / "allowed" / "notes"
+    source.mkdir(parents=True)
+    (source / "resource.md").write_text(
+        "# 资源管理\nRAII 在对象析构时释放资源，智能指针是常见例子。",
+        encoding="utf-8",
+    )
+    (source / "credential.md").write_text(
+        "# 智能指针\nTOKEN 是不应因词面降级而扩散的凭据名。",
+        encoding="utf-8",
+    )
+    state_store, trace_store = _create_initialized_stores(temporary_directory)
+    provider = ToolTestEmbedding()
+
+    with ChromaVectorStore(temporary_directory / "vectors") as vector_store:
+        synchronize_vector_index(
+            build_index_plan(_prepare(source), ()),
+            embedding_provider=provider,
+            vector_store=vector_store,
+            state_store=state_store,
+        )
+        tool = SearchNotesTool(
+            embedding_provider=provider,
+            vector_store=vector_store,
+            state_store=state_store,
+            trace_store=trace_store,
+            min_score=0.58,
+        )
+        response = tool.execute(
+            SearchNotesRequest(query="请用适合口头表达的方式解释 RAII。")
+        )
+        absent = tool.execute(SearchNotesRequest(query="请解释 TCP 拥塞控制。"))
+        secret = tool.execute(SearchNotesRequest(query="请解释 TOKEN。"))
+
+    assert response.status is SearchNotesStatus.SUCCESS
+    assert response.decision_code == "exact_term_fallback"
+    assert response.results[0].relative_path == "resource.md"
+    assert response.results[0].score < 0.58
+    assert absent.status is SearchNotesStatus.NO_RESULTS
+    assert absent.results == ()
+    assert secret.status is SearchNotesStatus.NO_RESULTS
+    trace = trace_store.load_records(response.trace_id)[0]
+    assert dict(trace.parameters)["decision_code"] == "exact_term_fallback"
+    assert trace.result_ids == (response.results[0].chunk_id,)
+
+
+def test_two_named_technical_terms_reject_unrelated_notes(
+    temporary_directory: Path,
+) -> None:
+    """即使向量分数满分，笔记缺少问题中的两个技术标识仍不能作证。"""
+    source = temporary_directory / "allowed" / "notes"
+    source.mkdir(parents=True)
+    (source / "other.md").write_text(
+        "# 拥塞控制\n传统网络连接会根据丢包调整发送窗口。",
+        encoding="utf-8",
+    )
+    state_store, trace_store = _create_initialized_stores(temporary_directory)
+    provider = CollidingEmbedding()
+
+    with ChromaVectorStore(temporary_directory / "vectors") as vector_store:
+        synchronize_vector_index(
+            build_index_plan(_prepare(source), ()),
+            embedding_provider=provider,
+            vector_store=vector_store,
+            state_store=state_store,
+        )
+        tool = SearchNotesTool(
+            embedding_provider=provider,
+            vector_store=vector_store,
+            state_store=state_store,
+            trace_store=trace_store,
+            min_score=0.58,
+        )
+        question = "HTTP3 中 QUIC 如何解决拥塞控制问题？"
+        refused = tool.execute(SearchNotesRequest(query=question))
+
+        (source / "quic.md").write_text(
+            "# QUIC 拥塞控制\nQUIC 根据确认与丢包信号调整拥塞窗口。",
+            encoding="utf-8",
+        )
+        current = _prepare(source)
+        synchronize_vector_index(
+            build_index_plan(current, state_store.load_document_states()),
+            embedding_provider=provider,
+            vector_store=vector_store,
+            state_store=state_store,
+        )
+        accepted = tool.execute(SearchNotesRequest(query=question))
+
+    assert refused.status is SearchNotesStatus.NO_RESULTS
+    assert refused.decision_code == "insufficient_topic_evidence"
+    assert accepted.status is SearchNotesStatus.SUCCESS
+    assert [item.relative_path for item in accepted.results] == ["quic.md"]
 
 
 @pytest.mark.parametrize(

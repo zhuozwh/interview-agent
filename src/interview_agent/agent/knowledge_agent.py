@@ -308,7 +308,7 @@ class KnowledgeAgent:
                 llm_request_id=None,
                 error=None,
                 confidence=AgentConfidence.LOW,
-                follow_up_questions=_follow_up_questions(route.intent),
+                follow_up_questions=(),
             )
         if context.status is RagContextStatus.TOOL_ERROR:
             return _error_response(
@@ -407,7 +407,11 @@ class KnowledgeAgent:
             tool_call_ids=tool_call_ids,
             llm_request_id=llm_request_id,
             error=None,
-            confidence=_evidence_confidence(validation),
+            confidence=(
+                AgentConfidence.LOW
+                if tool_response.decision_code == "exact_term_fallback"
+                else _evidence_confidence(validation)
+            ),
             follow_up_questions=_follow_up_questions(route.intent),
         )
 

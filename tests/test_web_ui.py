@@ -85,7 +85,6 @@ def test_citations_open_current_local_evidence_without_client_paths() -> None:
     assert "requestSequence !== state.evidenceRequestSequence" in javascript.text
     assert "引用对应的本地文件或行号已经变化" in javascript.text
     assert "body.detail || \"无法读取这条本地证据。\"" not in javascript.text
-    assert "setTimeout" not in javascript.text
 
 
 def test_chat_ui_exposes_evidence_strength_and_actionable_single_errors() -> None:
@@ -113,7 +112,12 @@ def test_chat_manual_retry_is_explicit_single_request_in_same_session() -> None:
     assert "state.manualRetryQuestion !== question" in javascript.text
     assert "payload.session_id = state.sessionId" in javascript.text
     assert "payload.previous_question = previousQuestion" in javascript.text
-    assert "setTimeout" not in javascript.text
+    pending_callback = javascript.text.split("window.setTimeout(() => {", 1)[1].split(
+        "}, 10000);", 1
+    )[0]
+    assert "fetch(" not in pending_callback
+    assert "submitQuestion(" not in pending_callback
+    assert "window.clearTimeout(pendingNoticeTimer)" in javascript.text
     assert "invalid_llm_response" in javascript.text
     assert '"pending"' in javascript.text
     assert "NON_FAILURE_STATUSES" in javascript.text
@@ -148,7 +152,6 @@ def test_external_search_requires_preview_confirmation_and_stays_ephemeral() -> 
     assert "payload.external" not in javascript.text
     assert "localStorage" not in javascript.text
     assert "sessionStorage" not in javascript.text
-    assert "setTimeout" not in javascript.text
 
 
 def test_health_remains_lightweight_after_web_ui_is_added(tmp_path) -> None:
